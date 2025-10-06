@@ -1,0 +1,17 @@
+{
+  "default": 
+    {"paths": {
+      "home": "TMP_DEFAULT",
+      "repo": "TMP_DEFAULT",
+      "data_folder": ""
+      }
+    },
+  "tplas": 
+    {"paths": {
+      "home": "/Users/tplas/",
+      "repo": "/Users/tplas/repos/PECL/",
+      "model_folder": "/Users/tplas/models/PECL/",
+      "data_folder": "/Users/tplas/data/2025-10 neureo/sample/"
+              }
+    }
+}
