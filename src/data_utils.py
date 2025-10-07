@@ -1,4 +1,4 @@
-import os, sys 
+import os, sys, json 
 import numpy as np 
 import pandas as pd 
 # from dwca.read import DwCAReader
@@ -24,7 +24,7 @@ import loadpaths
 path_dict = loadpaths.loadpaths()
 sys.path.append(os.path.join(path_dict['repo'], 'content/'))
 
-ONLINE_ACCESS_TO_GEE = False 
+ONLINE_ACCESS_TO_GEE = True 
 if ONLINE_ACCESS_TO_GEE:
     import api_keys
     import ee, geemap 
@@ -64,11 +64,11 @@ def create_timestamp(include_seconds=False):
     return timestamp
 
 def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01, 
-                             verbose=0, year=None, 
+                             verbose=0, year=None, threshold_size=128,
                              month_start_str='06', month_end_str='09',
                              image_collection='sentinel2'):
     assert ONLINE_ACCESS_TO_GEE, 'Need to set ONLINE_ACCESS_TO_GEE to True to use this function'
-    assert image_collection in ['sentinel2', 'alphaearth'], 'image_collection should be sentinel2 or alphaearth'
+    assert image_collection in ['sentinel2', 'alphaearth', 'worldclimbio'], 'image_collection should be sentinel2 or alphaearth'
     if year is None:
         year = 2024
 
@@ -100,12 +100,18 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01,
                             .filterDate(ee.Date(f'{year}-01-01'), ee.Date(f'{year}-12-31')) 
                             .first() 
                             .clip(aoi))
+        
+    elif image_collection == 'worldclimbio':
+        ex_im_gee = ee.Image("WORLDCLIM/V1/BIO").clip(aoi) 
+        point = ee.Geometry.Point(coords)  # redefine point for sampling
+        values = ex_im_gee.sample(region=point.buffer(1000), scale=1000).first().toDictionary().getInfo()
+        return values
     else:
         raise NotImplementedError(image_collection)
 
     im_dims = ex_im_gee.getInfo()["bands"][0]["dimensions"]
     
-    if im_dims[0] < 128 or im_dims[1] < 128:
+    if im_dims[0] < threshold_size or im_dims[1] < threshold_size:
         print('WARNING: image too small, returning None')
         return None
     
@@ -121,14 +127,16 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
                     verbose=0, year=None, 
                     month_start_str='06', month_end_str='09',
                     image_collection='sentinel2',
-                    path_save=None):
+                    path_save=None, resize_image=True):
+    assert image_collection in ['sentinel2', 'alphaearth', 'worldclimbio'], f'{image_collection} should be sentinel2 or alphaearth or worldclimbio or env'
     if year is None:
         year = 2024
 
     im_gee = get_gee_image_from_point(coords=coords, bool_buffer_in_deg=bool_buffer_in_deg, buffer_deg=buffer_deg, 
                            verbose=verbose, year=year, 
                            month_start_str=month_start_str, month_end_str=month_end_str,
-                           image_collection=image_collection)
+                           image_collection=image_collection,
+                           threshold_size=128)
     if im_gee is None:  ## if image was too small it was discarded
         return None, None
 
@@ -142,7 +150,15 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
         filename = f'{name}_sent2-4band_y-{year}_m-{month_start_str}-{month_end_str}.tif'
     elif image_collection == 'alphaearth':
         filename = f'{name}_alphaearth_y-{year}.tif'
+    elif image_collection == 'worldclimbio':
+        filename = f'{name}_worldclimbio_v1.json'
     filepath = os.path.join(path_save, filename)
+
+    if image_collection == 'worldclimbio':  # just return values
+        dict_save = {**im_gee, **{'coords': coords, 'name': name}}
+        with open(filepath, 'w') as f:
+            json.dump(dict_save, f)
+        return dict_save, filepath
     
     geemap.ee_export_image(
         im_gee, filename=filepath, 
@@ -150,32 +166,31 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
         file_per_band=False,# crs='EPSG:32630'
     )
 
-    ## load & save to size correctly (because of buffer): 
-    im = load_tiff(filepath, datatype='da')
-    remove_if_too_small = True
-    if image_collection == 'sentinel2':
-        desired_pixel_size = 128  # for sentinel2
-    elif image_collection == 'alphaearth':
-        desired_pixel_size = 128
-    
-    if verbose:
-        print('Original size: ', im.shape)
-    if im.shape[1] < desired_pixel_size or im.shape[2] < desired_pixel_size:
-        print('WARNING: image too small, returning None')
-        if remove_if_too_small:
-            os.remove(filepath)
-        return None, None
+    if resize_image:
+        ## load & save to size correctly (because of buffer): 
+        im = load_tiff(filepath, datatype='da')
+        remove_if_too_small = True
+        desired_pixel_size = 1
+        
+        if verbose:
+            print('Original size: ', im.shape)
+        if im.shape[1] < desired_pixel_size or im.shape[2] < desired_pixel_size:
+            print('WARNING: image too small, returning None')
+            if remove_if_too_small:
+                os.remove(filepath)
+            return None, None
 
-    ## crop:
-    padding_1 = (im.shape[1] - desired_pixel_size) // 2
-    padding_2 = (im.shape[2] - desired_pixel_size) // 2
-    im_crop = im[:, padding_1:desired_pixel_size + padding_1, padding_2:desired_pixel_size + padding_2]
-    assert im_crop.shape[0] == im.shape[0] and im_crop.shape[1] == desired_pixel_size and im_crop.shape[2] == desired_pixel_size, im_crop.shape
-    if verbose:
-        print('New size: ', im_crop.shape)
-    im_crop.rio.to_raster(filepath)
+        ## crop:
+        padding_1 = (im.shape[1] - desired_pixel_size) // 2
+        padding_2 = (im.shape[2] - desired_pixel_size) // 2
+        im_crop = im[:, padding_1:desired_pixel_size + padding_1, padding_2:desired_pixel_size + padding_2]
+        assert im_crop.shape[0] == im.shape[0] and im_crop.shape[1] == desired_pixel_size and im_crop.shape[2] == desired_pixel_size, im_crop.shape
+        if verbose:
+            print('New size: ', im_crop.shape)
+        im_crop.rio.to_raster(filepath)
+        im_gee = im_crop 
 
-    return im_crop, filepath
+    return im_gee, filepath
 
 def download_list_coord(coord_list, path_save=None, name_group='sample'):
     assert type(coord_list) == list
