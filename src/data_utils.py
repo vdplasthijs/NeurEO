@@ -320,7 +320,10 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
         im_loaded_s2 = np.clip(im_loaded_s2, 0, 3000)
         im_loaded_s2 = im_loaded_s2 / (3000)
         im_plot_s2 = im_loaded_s2[:3, ...]
-        im_nir_s2 = im_loaded_s2[1:, ...]
+        # im_nir_s2 = im_loaded_s2[1:, ...]
+        im_nir_s2 = im_loaded_s2[np.array([0, 1, 3]), ...]  # B4, B3, B8
+        ## put B8 band first:
+        im_nir_s2 = im_nir_s2[[2, 0, 1], ...]
         size_s2 = im_plot_s2.shape[1]
         assert size_s2 == im_plot_s2.shape[2]
         half_size_s2 = size_s2 // 2
