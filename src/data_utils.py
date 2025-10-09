@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd 
 # from dwca.read import DwCAReader
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 # import seaborn as sns 
 import shapely 
 import rasterio, rasterio.plot
@@ -19,7 +20,7 @@ from tqdm import tqdm
 # from matplotlib.colors import ListedColormap
 # import scipy.spatial, scipy.cluster
 # import json
-
+from collections import Counter
 import loadpaths
 path_dict = loadpaths.loadpaths()
 sys.path.append(os.path.join(path_dict['repo'], 'content/'))
@@ -55,6 +56,19 @@ def load_tiff(tiff_file_path, datatype='np', verbose=0):
 
     return im 
 
+def create_cmap_dynamic_world():
+    dict_classes = {
+        'water': '#419bdf',
+        'trees': '#397d49',
+        'grass': '#88b053',
+        'flooded_vegetation': '#7a87c6',
+        'crops': '#e49635',
+        'shrub_and_scrub': '#dfc35a',
+        'built': '#c4281b',
+        'bare': '#a59b8f',
+        'snow_and_ice': '#b39fe1'
+    }
+    return dict_classes
 
 def create_timestamp(include_seconds=False):
     dt = datetime.datetime.now()
@@ -68,7 +82,7 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01,
                              month_start_str='06', month_end_str='09',
                              image_collection='sentinel2'):
     assert ONLINE_ACCESS_TO_GEE, 'Need to set ONLINE_ACCESS_TO_GEE to True to use this function'
-    assert image_collection in ['sentinel2', 'alphaearth', 'worldclimbio'], 'image_collection should be sentinel2 or alphaearth'
+    assert image_collection in ['sentinel2', 'alphaearth', 'worldclimbio', 'dynamicworld'], f'image_collection {image_collection} not recognised.'
     if year is None:
         year = 2024
 
@@ -100,7 +114,28 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01,
                             .filterDate(ee.Date(f'{year}-01-01'), ee.Date(f'{year}-12-31')) 
                             .first() 
                             .clip(aoi))
-        
+    elif image_collection == 'dynamicworld':
+        # ex_collection = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+        # ex_im_gee = ee.Image(ex_collection 
+        #                     #   .project(crs='EPSG:27700', scale=1)
+        #                     .filterBounds(aoi) 
+        #                     .filterDate(ee.Date(f'{year}-01-01'), ee.Date(f'{year}-12-31')) 
+        #                     .first() 
+        #                     .clip(aoi))
+        prob_bands = [
+            "water", "trees", "grass", "flooded_vegetation",
+            "crops", "shrub_and_scrub", "built", "bare", "snow_and_ice"
+        ]
+        ex_collection = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+        ex_im_gee = ee.Image(ex_collection 
+                            #   .project(crs='EPSG:27700', scale=1)
+                            .filterBounds(aoi) 
+                            .filterDate(ee.Date(f'{year}-01-01'), ee.Date(f'{year}-12-31'))
+                            .select(prob_bands)  # get all probability bands
+                            .mean()  # mean over the year
+                            .reproject('EPSG:4326', scale=10)  # reproject to 10m
+                            .clip(aoi)
+                            )  # mean over the year
     elif image_collection == 'worldclimbio':
         ex_im_gee = ee.Image("WORLDCLIM/V1/BIO").clip(aoi) 
         point = ee.Geometry.Point(coords)  # redefine point for sampling
@@ -128,7 +163,7 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
                     month_start_str='06', month_end_str='09',
                     image_collection='sentinel2',
                     path_save=None, resize_image=True):
-    assert image_collection in ['sentinel2', 'alphaearth', 'worldclimbio'], f'{image_collection} should be sentinel2 or alphaearth or worldclimbio or env'
+    assert image_collection in ['sentinel2', 'alphaearth', 'worldclimbio', 'dynamicworld'], f'image collection {image_collection} not recognised.'
     if year is None:
         year = 2024
 
@@ -152,6 +187,8 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
         filename = f'{name}_alphaearth_y-{year}.tif'
     elif image_collection == 'worldclimbio':
         filename = f'{name}_worldclimbio_v1.json'
+    elif image_collection == 'dynamicworld':
+        filename = f'{name}_dynamicworld_y-{year}.tif'
     filepath = os.path.join(path_save, filename)
 
     if image_collection == 'worldclimbio':  # just return values
@@ -170,7 +207,7 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
         ## load & save to size correctly (because of buffer): 
         im = load_tiff(filepath, datatype='da')
         remove_if_too_small = True
-        desired_pixel_size = 1
+        desired_pixel_size = 128
         
         if verbose:
             print('Original size: ', im.shape)
@@ -196,7 +233,7 @@ def download_list_coord(coord_list, path_save=None, name_group='sample'):
     assert type(coord_list) == list
     for i, coords in enumerate(tqdm(coord_list)):
         name = f'{name_group}-{i}'
-        for im_collection in ['sentinel2', 'alphaearth']:
+        for im_collection in ['sentinel2', 'alphaearth', 'dynamicworld', 'worldclimbio']:
             im, path_im = download_gee_image(coords=coords, name=name, 
                                              path_save=path_save, verbose=0,
                                              image_collection=im_collection)
@@ -208,18 +245,22 @@ def get_images_from_name(path_folder=path_dict['data_folder'], name='sample-0'):
     contents = os.listdir(path_folder)
     contents = [f for f in contents if name in f and f.endswith('.tif')]
     assert len(contents) > 0, f'No files found in {path_folder}'
-    assert len(contents) <= 2, f'More than 2 files found in {path_folder}, please specify name more precisely: {contents}'
+    assert len(contents) <= 4, f'More than 4 files found in {path_folder}, please specify name more precisely: {contents}'
 
-    file_sent, file_alpha = None, None
+    file_sent, file_alpha, file_dynamic, file_worldclimbio = None, None, None, None
     for file in contents:
         if file.split('_')[1].startswith('sent2'):
             file_sent = file
         elif file.split('_')[1].startswith('alphaearth'):
-            file_alpha = file 
+            file_alpha = file
+        elif file.split('_')[1].startswith('dynamicworld'):
+            file_dynamic = file
+        elif file.split('_')[1].startswith('worldclimbio'):
+            file_worldclimbio = file
 
     assert file_sent or file_alpha
 
-    return (file_sent, file_alpha)
+    return (file_sent, file_alpha, file_dynamic, file_worldclimbio)
 
 
 ## Plotting images:
@@ -256,10 +297,14 @@ def plot_image_simple(im, ax=None, name_file=None, use_im_extent=False, verbose=
         name_tile = name_file.split('/')[-1].rstrip('.tif')
         ax.set_title(name_tile)
 
-def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0', verbose=0):
-    (file_sent, file_alpha) = get_images_from_name(path_folder=path_folder, name=name)
+def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0', 
+                         plot_alphaearth=True, plot_dynamicworld_full=True,
+                         verbose=0):
+    (file_sent, file_alpha, file_dynamic, file_worldclimbio) = get_images_from_name(path_folder=path_folder, name=name)
     path_sent = os.path.join(path_folder, file_sent) if file_sent is not None else None
     path_alpha = os.path.join(path_folder, file_alpha) if file_alpha is not None else None
+    path_dynamic = os.path.join(path_folder, file_dynamic) if file_dynamic is not None else None
+    path_worldclimbio = os.path.join(path_folder, file_worldclimbio) if file_worldclimbio is not None else None
 
     if path_alpha is not None:
         im_loaded_alpha = load_tiff(path_alpha, datatype='da')
@@ -282,33 +327,74 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0', 
         quarter_size_s2 = size_s2 // 4
         # im_plot_s2 = im_plot_s2[:, quarter_size_s2:half_size_s2 + quarter_size_s2, quarter_size_s2:half_size_s2 + quarter_size_s2]
         
+    if path_dynamic is not None:
+        im_loaded_dynamic = load_tiff(path_dynamic, datatype='da')
+        im_argmax_dynamic = np.argmax(im_loaded_dynamic.values, axis=0)
+        print(Counter(im_argmax_dynamic.flatten()))
+        ## normalise:
+        # im_plot_dynamic.values[im_plot_dynamic.values == -np.inf] = np.nan
+        # im_plot_dynamic.values[im_plot_dynamic.values == np.inf] = np.nan
+        # im_plot_dynamic = (im_plot_dynamic - np.nanmin(im_plot_dynamic)) / (np.nanmax(im_plot_dynamic) - np.nanmin(im_plot_dynamic))
+
     if verbose:
         print(im_loaded_alpha.shape, type(im_loaded_alpha))
         print(im_loaded_s2.shape, type(im_loaded_s2))
 
-    fig, ax = plt.subplots(5, 5, figsize=(15, 15))
-    ax = ax.flatten()
-    ax_ind = 4
-    for ii in range(20):
-        ax_ind += 1
-        bands_alpha_plot = np.arange(ii * 3, (ii + 1) * 3)
-        if bands_alpha_plot.max() >= im_plot_alpha.shape[0]:
-            if ax_ind < len(ax):
-                naked(ax[ax_ind])
-            continue
-        plot_image_simple(im_plot_alpha[bands_alpha_plot, ...], ax=ax[ax_ind])
-        ax[ax_ind].set_ylim(ax[ax_ind].get_ylim()[::-1])
-        ax[ax_ind].set_title(f'AlphaEarth bands {bands_alpha_plot}')
+    n_rows = 1 + 2 * int(plot_dynamicworld_full) + 4 * int(plot_alphaearth)
 
+    fig, ax = plt.subplots(n_rows, 5, figsize=(15, 3 * n_rows))
+    ax = ax.flatten()
+
+    ## Top row:
     plot_image_simple(im_plot_s2, ax=ax[0])
     ax[0].set_title('Sentinel-2 RGB')
 
     plot_image_simple(im_nir_s2, ax=ax[1])
     ax[1].set_title('Sentinel-2 near infrared')
 
-    for ii in range(2, 5):
+    if path_dynamic is not None:
+        dict_classes = create_cmap_dynamic_world()
+        cmap_dw = ListedColormap([v for v in dict_classes.values()])
+        im = ax[2].imshow(im_argmax_dynamic, cmap=cmap_dw, interpolation='none', origin='upper', vmax=8.5, vmin=-0.5)
+        # Place colorbar outside of ax[2] to avoid shrinking the imshow
+        cbar = fig.colorbar(im, ax=ax[2], ticks=np.arange(0, 9), location='right', fraction=0.046, pad=0.04)
+        cbar.ax.set_yticks(np.arange(0, 9))
+        cbar.ax.set_yticklabels([k for k in dict_classes.keys()])
+        # ax[2].set_title('Dynamic World land cover')
+        naked(ax[2])
+
+    for ii in range(3, 5):
         naked(ax[ii])
 
+    ## dynamic world full:
+    if plot_dynamicworld_full and path_dynamic is not None:
+        for ii in range(9):
+            ax_ind = 5 + ii
+            im = ax[ax_ind].imshow(im_loaded_dynamic[ii, ...], cmap='viridis', interpolation='none', 
+                                   origin='upper', vmin=0, vmax=1)
+            naked(ax[ax_ind])
+            ax[ax_ind].set_title(f'DW {ii}: {list(dict_classes.keys())[ii]}')
+        ## add cbar to last plot:
+        cbar = fig.colorbar(im, ax=ax[ax_ind], ticks=np.linspace(0, 1, 6),
+                            location='right', fraction=0.046, pad=0.04)
+        cbar.ax.set_ylabel('Probability', rotation=270, labelpad=15)
+        ax_ind += 1
+        naked(ax[ax_ind])
+
+    ## alpha earth:
+    if plot_alphaearth and path_alpha is not None:
+        for ii in range(20):
+            ax_ind += 1
+            bands_alpha_plot = np.arange(ii * 3, (ii + 1) * 3)
+            if bands_alpha_plot.max() >= im_plot_alpha.shape[0]:
+                if ax_ind < len(ax):
+                    naked(ax[ax_ind])
+                continue
+            plot_image_simple(im_plot_alpha[bands_alpha_plot, ...], ax=ax[ax_ind])
+            ax[ax_ind].set_ylim(ax[ax_ind].get_ylim()[::-1])
+            ax[ax_ind].set_title(f'AlphaEarth bands {bands_alpha_plot}')
+
+    
 def plot_distr_embeddings(path_folder=path_dict['data_folder'], name='sample-0', verbose=0):
     (file_sent, file_alpha) = get_images_from_name(path_folder=path_folder, name=name)
     path_sent = os.path.join(path_folder, file_sent) if file_sent is not None else None
