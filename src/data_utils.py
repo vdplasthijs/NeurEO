@@ -242,8 +242,7 @@ def download_list_coord(coord_list, path_save=None, name_group='sample'):
 
 def get_images_from_name(path_folder=path_dict['data_folder'], name='sample-0'):
     assert os.path.exists(path_folder), path_folder
-    contents = os.listdir(path_folder)
-    contents = [f for f in contents if name in f and f.endswith('.tif')]
+    contents = [f for f in os.listdir(path_folder) if name in f]
     assert len(contents) > 0, f'No files found in {path_folder}'
     assert len(contents) <= 4, f'More than 4 files found in {path_folder}, please specify name more precisely: {contents}'
 
@@ -258,8 +257,8 @@ def get_images_from_name(path_folder=path_dict['data_folder'], name='sample-0'):
         elif file.split('_')[1].startswith('worldclimbio'):
             file_worldclimbio = file
 
-    assert file_sent or file_alpha
-
+    if file_sent is None and file_alpha is None and file_dynamic is None and file_worldclimbio is None:
+        raise ValueError(f'No recognised files found in {path_folder} with name {name}')
     return (file_sent, file_alpha, file_dynamic, file_worldclimbio)
 
 
@@ -397,6 +396,50 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
             ax[ax_ind].set_ylim(ax[ax_ind].get_ylim()[::-1])
             ax[ax_ind].set_title(f'AlphaEarth bands {bands_alpha_plot}')
 
+def load_all_modalities_from_name(path_folder=path_dict['data_folder'], name='sample-0', verbose=0):
+    (file_sent, file_alpha, file_dynamic, file_worldclimbio) = get_images_from_name(path_folder=path_folder, name=name)
+    path_sent = os.path.join(path_folder, file_sent) if file_sent is not None else None
+    path_alpha = os.path.join(path_folder, file_alpha) if file_alpha is not None else None
+    path_dynamic = os.path.join(path_folder, file_dynamic) if file_dynamic is not None else None
+    path_worldclimbio = os.path.join(path_folder, file_worldclimbio) if file_worldclimbio is not None else None
+
+    im_loaded_alpha, im_loaded_s2, im_loaded_dynamic, im_loaded_worldclimbio = None, None, None, None
+
+    if path_sent is not None:
+        im_loaded_s2 = load_tiff(path_sent, datatype='da')
+        if verbose:
+            print('Sentinel-2:', im_loaded_s2.shape, type(im_loaded_s2))
+    else:
+        if verbose:
+            print('No sentinel-2 image found')
+
+    if path_alpha is not None:
+        im_loaded_alpha = load_tiff(path_alpha, datatype='da')
+        ## vertical flip:
+        im_loaded_alpha = im_loaded_alpha[:, ::-1, :]
+        if verbose:
+            print('AlphaEarth:', im_loaded_alpha.shape, type(im_loaded_alpha))
+    else:
+        if verbose:
+            print('No alphaearth image found')
+
+    if path_dynamic is not None:
+        im_loaded_dynamic = load_tiff(path_dynamic, datatype='da')
+        if verbose:
+            print('Dynamic World:', im_loaded_dynamic.shape, type(im_loaded_dynamic))
+    else:
+        if verbose:
+            print('No dynamic world image found')
+    if path_worldclimbio is not None:
+        with open(path_worldclimbio, 'r') as f:
+            im_loaded_worldclimbio = json.load(f)
+        if verbose:
+            print('WorldClimBio:', type(im_loaded_worldclimbio), im_loaded_worldclimbio.keys())
+    else:
+        if verbose:
+            print('No worldclimbio data found')
+
+    return im_loaded_s2, im_loaded_alpha, im_loaded_dynamic, im_loaded_worldclimbio
     
 def plot_distr_embeddings(path_folder=path_dict['data_folder'], name='sample-0', verbose=0):
     (file_sent, file_alpha) = get_images_from_name(path_folder=path_folder, name=name)
