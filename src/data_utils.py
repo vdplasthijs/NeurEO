@@ -308,5 +308,57 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0', 
 
     for ii in range(2, 5):
         naked(ax[ii])
+
+def plot_distr_embeddings(path_folder=path_dict['data_folder'], name='sample-0', verbose=0):
+    (file_sent, file_alpha) = get_images_from_name(path_folder=path_folder, name=name)
+    path_sent = os.path.join(path_folder, file_sent) if file_sent is not None else None
+    path_alpha = os.path.join(path_folder, file_alpha) if file_alpha is not None else None
+
+    if path_alpha is not None:
+        im_loaded_alpha = load_tiff(path_alpha, datatype='da')
+        im_plot_alpha = im_loaded_alpha
+        ## normalise:
+        im_plot_alpha.values[im_plot_alpha.values == -np.inf] = np.nan
+        im_plot_alpha.values[im_plot_alpha.values == np.inf] = np.nan
+        im_plot_alpha = (im_plot_alpha - np.nanmin(im_plot_alpha)) / (np.nanmax(im_plot_alpha) - np.nanmin(im_plot_alpha))
+        # im_plot_alpha = np.swapaxes(im_plot_alpha, 2, 1)  # change to (bands, height, width) to (height, width, bands)`
+
+    if path_sent is not None:
+        im_loaded_s2 = load_tiff(path_sent, datatype='da')
+        im_loaded_s2 = np.clip(im_loaded_s2, 0, 3000)
+        im_loaded_s2 = im_loaded_s2 / (3000)
+        im_plot_s2 = im_loaded_s2[:3, ...]
+        im_nir_s2 = im_loaded_s2[1:, ...]
+        size_s2 = im_plot_s2.shape[1]
+        assert size_s2 == im_plot_s2.shape[2]
+        half_size_s2 = size_s2 // 2
+        quarter_size_s2 = size_s2 // 4
+        # im_plot_s2 = im_plot_s2[:, quarter_size_s2:half_size_s2 + quarter_size_s2, quarter_size_s2:half_size_s2 + quarter_size_s2]
+        
+    if verbose:
+        print(im_loaded_alpha.shape, type(im_loaded_alpha))
+        print(im_loaded_s2.shape, type(im_loaded_s2))
+
+    fig, ax = plt.subplots(3, 3, figsize=(10, 10))
+    ax = ax.flatten()
+
+    plot_image_simple(im_plot_s2, ax=ax[0])
+    ax[0].set_title('Sentinel-2 RGB')
+
+    for ii in range(8):
+        bands = np.arange(ii * 8, (ii + 1) * 8)
+        if bands.max() >= im_plot_alpha.shape[0]:
+            if ii + 1 < len(ax):
+                naked(ax[ii + 1])
+            continue
+
+        ax_ind = ii + 1
+        curr_ax = ax[ax_ind]
+        for jj, band in enumerate(bands):
+            if band >= im_plot_alpha.shape[0]:
+                continue
+            curr_ax.hist(im_plot_alpha[band, ...].to_numpy().flatten(), bins=np.linspace(0, 1, 41), alpha=0.5, label=f'Band {band}',
+                         histtype='stepfilled', density=True, color=plt.cm.viridis(jj / len(bands)))
+        curr_ax.set_xlim(-0.1, 1.1)
 if __name__ == "__main__":
     print('This is a utility script for creating and processing the dataset.')
