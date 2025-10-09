@@ -17,9 +17,7 @@ import datetime
 # import geopandas as gpd
 from tqdm import tqdm
 # import scipy 
-# from matplotlib.colors import ListedColormap
 # import scipy.spatial, scipy.cluster
-# import json
 from collections import Counter
 import loadpaths
 path_dict = loadpaths.loadpaths()
