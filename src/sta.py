@@ -90,19 +90,21 @@ lim = np.nanmax(np.abs(all_stas[:b_to_plot, :f_to_plot]))
 for row, band_stas in enumerate(all_stas[:b_to_plot]):
     for col, sta in enumerate(band_stas[:f_to_plot]):
         plt.subplot(b_to_plot, f_to_plot, row * f_to_plot + col + 1)
-        plt.imshow(-sta, vmin=-lim, vmax=lim, cmap="RdBu") # Minus sign to make blue -> red
+        plt.imshow(sta, vmin=-lim, vmax=lim, cmap="RdBu_r") # Minus sign to make blue -> red
         plt.xticks([])
         plt.yticks([])
         if col == 0:
-            plt.ylabel(names[row])
+            plt.ylabel(names[row], rotation=0, labelpad=20)
+        if row == 0:
+            plt.title(f'F{col}')
             
 # Plot the map for a particular feature that you might like across patches
 cols=4
 rows=int(np.ceil(patches/cols))
 curr_f = 9
 lim = np.nanmax(np.abs(np.stack(features, axis=-1)[curr_f]))
-plt.figure(figsize=(2*rows, 2*cols))
+plt.figure(figsize=(2*cols, 2*rows))
 for p, feature in enumerate(features):
     plt.subplot(rows, cols, p + 1)
-    plt.imshow(-feature[curr_f], vmin=-lim, vmax=lim, cmap="RdBu")
+    plt.imshow(feature[curr_f], vmin=-lim, vmax=lim, cmap="RdBu_r")
     plt.axis('off')
