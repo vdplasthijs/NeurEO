@@ -27,6 +27,14 @@ for p in range(patches):
     f_dat[~np.isfinite(f_dat)] = np.nan
     features.append(f_dat)    
 
+# Z-score across patches for each feature and each hypothesis
+feat_m = np.stack([np.nanmean(f) for f in np.stack(features, axis=-1)])
+feat_std = np.stack([np.nanstd(f) for f in np.stack(features, axis=-1)])
+features = [(f - feat_m[:,None,None])/feat_std[:,None,None] for f in features]
+hyp_m = np.stack([np.nanmean(h) for h in np.stack(hypotheses, axis=-1)])
+hyp_std = np.stack([np.nanstd(h) for h in np.stack(hypotheses, axis=-1)])
+hypotheses = [(h - hyp_m[:,None,None])/hyp_std[:,None,None] for h in hypotheses]
+
 # Get names of hypotheses: different coarse land coverage classes
 names = [k for k in du.create_cmap_dynamic_world().keys()]
 
@@ -73,7 +81,7 @@ for p, (hypothesis, feature) in enumerate(zip(hypotheses, features)):
     for b, band_rois in enumerate(rois):
         print(f'Calculating spike triggered averages for band {b} / {len(rois)}')
         # Then create the spike time average: multiply each roi by the pixel value of the feature pixel
-        band_stas = [band_rois * d[:,:,None,None] / np.nansum(d) for d in feature]
+        band_stas = [band_rois * d[:,:,None,None] for d in feature]
         # Then average across all pixels and stack to get big output array
         band_stas = np.stack([np.nansum(sta.reshape([-1, radius*2+1, radius*2+1]), axis=0) for sta in band_stas])
         # And append to output stas
@@ -85,12 +93,15 @@ all_stas = np.nanmean(np.stack(patch_stas), axis=0)
 # Plot a selection
 b_to_plot = len(all_stas)
 f_to_plot = 32
+common_scale = False
 plt.figure(figsize=(f_to_plot, b_to_plot))
 lim = np.nanmax(np.abs(all_stas[:b_to_plot, :f_to_plot]))
 for row, band_stas in enumerate(all_stas[:b_to_plot]):
     for col, sta in enumerate(band_stas[:f_to_plot]):
         plt.subplot(b_to_plot, f_to_plot, row * f_to_plot + col + 1)
-        plt.imshow(sta, vmin=-lim, vmax=lim, cmap="RdBu_r") # Minus sign to make blue -> red
+        plt.imshow(sta, cmap='RdBu_r' if common_scale else 'viridis', 
+                   vmin=-lim if common_scale else np.nanmin(sta), 
+                   vmax=lim if common_scale else np.nanmax(sta))
         plt.xticks([])
         plt.yticks([])
         if col == 0:
