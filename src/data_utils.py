@@ -80,7 +80,7 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01,
                              month_start_str='06', month_end_str='09',
                              image_collection='sentinel2'):
     assert ONLINE_ACCESS_TO_GEE, 'Need to set ONLINE_ACCESS_TO_GEE to True to use this function'
-    assert image_collection in ['sentinel2', 'alphaearth', 'worldclimbio', 'dynamicworld'], f'image_collection {image_collection} not recognised.'
+    assert image_collection in ['sentinel2', 'alphaearth', 'worldclimbio', 'dynamicworld', 'dsm'], f'image_collection {image_collection} not recognised.'
     if year is None:
         year = 2024
 
@@ -139,6 +139,15 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01,
         point = ee.Geometry.Point(coords)  # redefine point for sampling
         values = ex_im_gee.sample(region=point.buffer(1000), scale=1000).first().toDictionary().getInfo()
         return values
+    elif image_collection == 'dsm':
+        ex_collection = ee.ImageCollection("COPERNICUS/DEM/GLO30")
+        ex_im_gee = ee.Image(ex_collection
+                            .filterBounds(aoi)
+                            .select(['DEM'])  # select the DEM band
+                            # .filterDate(ee.Date(f'{year}-01-01'), ee.Date(f'{year}-12-31'))
+                            .first()
+                            .clip(aoi))
+        threshold_size = max(32, threshold_size // 4)  # DSM is 30m resolution, so allow smaller images
     else:
         raise NotImplementedError(image_collection)
 
@@ -161,7 +170,7 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
                     month_start_str='06', month_end_str='09',
                     image_collection='sentinel2',
                     path_save=None, resize_image=True):
-    assert image_collection in ['sentinel2', 'alphaearth', 'worldclimbio', 'dynamicworld'], f'image collection {image_collection} not recognised.'
+    assert image_collection in ['sentinel2', 'alphaearth', 'worldclimbio', 'dynamicworld' ,'dsm'], f'image collection {image_collection} not recognised.'
     if year is None:
         year = 2024
 
@@ -187,6 +196,8 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
         filename = f'{name}_worldclimbio_v1.json'
     elif image_collection == 'dynamicworld':
         filename = f'{name}_dynamicworld_y-{year}.tif'
+    elif image_collection == 'dsm':
+        filename = f'{name}_dsm_y-{year}.tif'
     filepath = os.path.join(path_save, filename)
 
     if image_collection == 'worldclimbio':  # just return values
@@ -227,24 +238,38 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
 
     return im_gee, filepath
 
-def download_list_coord(coord_list, path_save=None, name_group='sample'):
+def download_list_coord(coord_list, path_save=None, 
+                        name_group='sample', start_index=0,
+                        list_collections=['sentinel2', 'alphaearth', 'dynamicworld', 'worldclimbio', 'dsm']):
     assert type(coord_list) == list
+    inds_none = []
     for i, coords in enumerate(tqdm(coord_list)):
+        if i < start_index:
+            continue
         name = f'{name_group}-{i}'
-        for im_collection in ['sentinel2', 'alphaearth', 'dynamicworld', 'worldclimbio']:
-            im, path_im = download_gee_image(coords=coords, name=name, 
-                                             path_save=path_save, verbose=0,
-                                             image_collection=im_collection)
+        for im_collection in list_collections:
+            try:
+                im, path_im = download_gee_image(coords=coords, name=name, 
+                                                path_save=path_save, verbose=0,
+                                                image_collection=im_collection)
+            except Exception as e:
+                print(f'Image {name} could not be downloaded, error: {e}')
+                im = None
             if im is None:
                 print(f'Image {name} could not be downloaded')
+                inds_none.append(i)
+        
+    if len(inds_none) > 0:
+        print(f'Images that could not be downloaded: {inds_none}')
+    return inds_none
 
 def get_images_from_name(path_folder=path_dict['data_folder'], name='sample-0'):
     assert os.path.exists(path_folder), path_folder
-    contents = [f for f in os.listdir(path_folder) if name in f]
+    contents = [f for f in os.listdir(path_folder) if name == f.split('_')[0]]
     assert len(contents) > 0, f'No files found in {path_folder}'
-    assert len(contents) <= 4, f'More than 4 files found in {path_folder}, please specify name more precisely: {contents}'
+    assert len(contents) <= 5, f'More than 5 files found in {path_folder}, please specify name more precisely: {contents}'
 
-    file_sent, file_alpha, file_dynamic, file_worldclimbio = None, None, None, None
+    file_sent, file_alpha, file_dynamic, file_worldclimbio, file_dsm = None, None, None, None, None
     for file in contents:
         if file.split('_')[1].startswith('sent2'):
             file_sent = file
@@ -254,10 +279,12 @@ def get_images_from_name(path_folder=path_dict['data_folder'], name='sample-0'):
             file_dynamic = file
         elif file.split('_')[1].startswith('worldclimbio'):
             file_worldclimbio = file
+        elif file.split('_')[1].startswith('dsm'):
+            file_dsm = file
 
-    if file_sent is None and file_alpha is None and file_dynamic is None and file_worldclimbio is None:
+    if file_sent is None and file_alpha is None and file_dynamic is None and file_worldclimbio is None and file_dsm is None:
         raise ValueError(f'No recognised files found in {path_folder} with name {name}')
-    return (file_sent, file_alpha, file_dynamic, file_worldclimbio)
+    return (file_sent, file_alpha, file_dynamic, file_worldclimbio, file_dsm)
 
 
 ## Plotting images:
@@ -297,11 +324,12 @@ def plot_image_simple(im, ax=None, name_file=None, use_im_extent=False, verbose=
 def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0', 
                          plot_alphaearth=True, plot_dynamicworld_full=True,
                          verbose=0):
-    (file_sent, file_alpha, file_dynamic, file_worldclimbio) = get_images_from_name(path_folder=path_folder, name=name)
+    (file_sent, file_alpha, file_dynamic, file_worldclimbio, file_dsm) = get_images_from_name(path_folder=path_folder, name=name)
     path_sent = os.path.join(path_folder, file_sent) if file_sent is not None else None
     path_alpha = os.path.join(path_folder, file_alpha) if file_alpha is not None else None
     path_dynamic = os.path.join(path_folder, file_dynamic) if file_dynamic is not None else None
     path_worldclimbio = os.path.join(path_folder, file_worldclimbio) if file_worldclimbio is not None else None
+    path_dsm = os.path.join(path_folder, file_dsm) if file_dsm is not None else None
 
     if path_alpha is not None:
         im_loaded_alpha = load_tiff(path_alpha, datatype='da')
@@ -330,12 +358,15 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
     if path_dynamic is not None:
         im_loaded_dynamic = load_tiff(path_dynamic, datatype='da')
         im_argmax_dynamic = np.argmax(im_loaded_dynamic.values, axis=0)
-        print(Counter(im_argmax_dynamic.flatten()))
+        print('LC pixel count:', Counter(im_argmax_dynamic.flatten()))
         ## normalise:
         # im_plot_dynamic.values[im_plot_dynamic.values == -np.inf] = np.nan
         # im_plot_dynamic.values[im_plot_dynamic.values == np.inf] = np.nan
         # im_plot_dynamic = (im_plot_dynamic - np.nanmin(im_plot_dynamic)) / (np.nanmax(im_plot_dynamic) - np.nanmin(im_plot_dynamic))
 
+    if path_dsm is not None:
+        im_loaded_dsm = load_tiff(path_dsm, datatype='da')
+        
     if verbose:
         print(im_loaded_alpha.shape, type(im_loaded_alpha))
         print(im_loaded_s2.shape, type(im_loaded_s2))
@@ -361,9 +392,15 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
         cbar.ax.set_yticks(np.arange(0, 9))
         cbar.ax.set_yticklabels([k for k in dict_classes.keys()])
         # ax[2].set_title('Dynamic World land cover')
-        naked(ax[2])
 
-    for ii in range(3, 5):
+    if path_dsm is not None:
+        plot_image_simple(im_loaded_dsm, ax=ax[4], name_file=path_dsm)
+        ## cbar:
+        mappable = ax[4].images[0]
+        cbar = fig.colorbar(mappable, ax=ax[4], location='right', fraction=0.046, pad=0.04)
+        ax[4].set_title('DSM (m)')
+
+    for ii in range(2, 5):
         naked(ax[ii])
 
     ## dynamic world full:
@@ -395,13 +432,14 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
             ax[ax_ind].set_title(f'AlphaEarth bands {bands_alpha_plot}')
 
 def load_all_modalities_from_name(path_folder=path_dict['data_folder'], name='sample-0', verbose=0):
-    (file_sent, file_alpha, file_dynamic, file_worldclimbio) = get_images_from_name(path_folder=path_folder, name=name)
+    (file_sent, file_alpha, file_dynamic, file_worldclimbio, file_dsm) = get_images_from_name(path_folder=path_folder, name=name)
     path_sent = os.path.join(path_folder, file_sent) if file_sent is not None else None
     path_alpha = os.path.join(path_folder, file_alpha) if file_alpha is not None else None
     path_dynamic = os.path.join(path_folder, file_dynamic) if file_dynamic is not None else None
     path_worldclimbio = os.path.join(path_folder, file_worldclimbio) if file_worldclimbio is not None else None
+    path_dsm = os.path.join(path_folder, file_dsm) if file_dsm is not None else None
 
-    im_loaded_alpha, im_loaded_s2, im_loaded_dynamic, im_loaded_worldclimbio = None, None, None, None
+    im_loaded_alpha, im_loaded_s2, im_loaded_dynamic, im_loaded_worldclimbio, im_loaded_dsm = None, None, None, None, None
 
     if path_sent is not None:
         im_loaded_s2 = load_tiff(path_sent, datatype='da')
@@ -437,10 +475,18 @@ def load_all_modalities_from_name(path_folder=path_dict['data_folder'], name='sa
         if verbose:
             print('No worldclimbio data found')
 
-    return im_loaded_s2, im_loaded_alpha, im_loaded_dynamic, im_loaded_worldclimbio
-    
+    if path_dsm is not None:
+        im_loaded_dsm = load_tiff(path_dsm, datatype='da')
+        if verbose:
+            print('DSM:', im_loaded_dsm.shape, type(im_loaded_dsm))
+    else:
+        if verbose:
+            print('No DSM image found')
+
+    return im_loaded_s2, im_loaded_alpha, im_loaded_dynamic, im_loaded_worldclimbio, im_loaded_dsm
+
 def plot_distr_embeddings(path_folder=path_dict['data_folder'], name='sample-0', verbose=0):
-    (file_sent, file_alpha) = get_images_from_name(path_folder=path_folder, name=name)
+    (file_sent, file_alpha, file_dynamic, file_worldclimbio, file_dsm) = get_images_from_name(path_folder=path_folder, name=name)
     path_sent = os.path.join(path_folder, file_sent) if file_sent is not None else None
     path_alpha = os.path.join(path_folder, file_alpha) if file_alpha is not None else None
 

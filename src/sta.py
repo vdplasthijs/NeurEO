@@ -11,7 +11,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 # Get one example dataset and plot
-(data_sent, data_alpha, data_dyn, data_worldclim) = du.load_all_modalities_from_name(name='pecl-fig-0', path_folder='../content/sample_data', verbose=1)
+(data_sent, data_alpha, data_dyn, data_worldclim, data_dsm) = du.load_all_modalities_from_name(name='pecl-fig-0', path_folder='../content/sample_data', verbose=1)
 du.plot_overview_images('../content/sample_data', name='pecl-fig-0', plot_alphaearth=True, plot_dynamicworld_full=True)
 
 # Then collect from all patches the alpha and dyn data
@@ -19,7 +19,7 @@ patches = 10
 hypotheses = []
 features = []
 for p in range(patches):
-    (data_sent, data_alpha, data_dyn, data_worldclim) = du.load_all_modalities_from_name(name=f'pecl-fig-{p}', path_folder='../content/sample_data', verbose=1)
+    (data_sent, data_alpha, data_dyn, data_worldclim, data_dsm) = du.load_all_modalities_from_name(name=f'pecl-fig-{p}', path_folder='../content/sample_data', verbose=1)
     # Land coverage serves as hypotheses
     hypotheses.append(data_dyn.data)
     # This can definitely be cleaner but I use nan for undefined values
