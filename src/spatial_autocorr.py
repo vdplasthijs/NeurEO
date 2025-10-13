@@ -12,7 +12,9 @@ path_dict_pecl = loadpaths.loadpaths()
 # from tqdm import tqdm, tqdm_notebook
 # import ast, shutil
 
-def compute_range_for_band(band_array, transform, maxlag=2000, n_subsample=5000):
+def compute_range_for_band(band_array, transform, 
+                           model='spherical',
+                           maxlag=2000, n_subsample=5000):
     """Compute spatial correlation length (range) in meters."""
     # Get valid pixels
     rows, cols = np.where(~np.isnan(band_array))
@@ -26,7 +28,7 @@ def compute_range_for_band(band_array, transform, maxlag=2000, n_subsample=5000)
     values = band_array[rows, cols]
 
     # Compute variogram
-    V = Variogram(coords, values, model='exponential', maxlag=maxlag, 
+    V = Variogram(coords, values, model=model, maxlag=maxlag, 
                   n_lags=20, bin_func='uniform')
     return V, V.describe()['effective_range']
 
@@ -39,17 +41,18 @@ if __name__ == "__main__":
     assert os.path.exists(save_folder), save_folder
 
     sentinel, features, hypotheses = du.load_all_data(path_folder=path_folder, prefix_name=prefix_name)
-    features_nonnan = [f for f in features if np.sum(np.isnan(f)) == 0]
+    # features_nonnan = [f for f in features if np.sum(np.isnan(f)) == 0]
 
-    n_patches = len(features_nonnan)
-    n_features = len(features_nonnan[0])
+    n_patches = len(features)
+    n_features = len(features[0])
     assert n_features == 64
 
     mat_effective_range = np.zeros((n_patches, n_features))
     for i in tqdm(range(n_patches)):
         for j in range(n_features):
-            band_array = features_nonnan[i][j]
-            V, effective_range = compute_range_for_band(band_array, 10, n_subsample=600)
+            band_array = features[i][j]
+            V, effective_range = compute_range_for_band(band_array, 10, n_subsample=600,
+                                                        model='spherical')
             mat_effective_range[i, j] = effective_range
         ## temp save:
         np.save(os.path.join(save_folder, save_name), mat_effective_range)
