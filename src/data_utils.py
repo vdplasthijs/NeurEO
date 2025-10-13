@@ -434,6 +434,13 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
             ax[ax_ind].set_title(f'AlphaEarth bands {bands_alpha_plot}')
 
 def load_all_modalities_from_name(path_folder=path_dict['data_folder'], name='sample-0', verbose=0):
+    ## Check if file exists, otherwise return None:
+    tmp_files = [f for f in os.listdir(path_folder) if name == f.split('_')[0]]
+    if len(tmp_files) == 0:
+        if verbose:
+            print(f'No files found in {path_folder} with name {name}')
+        return None, None, None, None, None
+    
     (file_sent, file_alpha, file_dynamic, file_worldclimbio, file_dsm) = get_images_from_name(path_folder=path_folder, name=name)
     path_sent = os.path.join(path_folder, file_sent) if file_sent is not None else None
     path_alpha = os.path.join(path_folder, file_alpha) if file_alpha is not None else None
@@ -487,6 +494,31 @@ def load_all_modalities_from_name(path_folder=path_dict['data_folder'], name='sa
 
     return im_loaded_s2, im_loaded_alpha, im_loaded_dynamic, im_loaded_worldclimbio, im_loaded_dsm
 
+def load_all_data(path_folder='/Users/tplas/data/2025-10 neureo/pecl-100-subsample-30km', 
+                  prefix_name='pecl176-'):
+    assert os.path.exists(path_folder), path_folder
+    
+    patches = len(os.listdir(path_folder))  ## overestimate, doesnt matter.
+    hypotheses = []
+    features = []
+    sentinel = []
+    for p in range(patches):
+        (data_sent, data_alpha, data_dyn, data_worldclim, data_dsm) = load_all_modalities_from_name(name=f'{prefix_name}{p}', 
+                                                                                path_folder=path_folder, verbose=0)
+
+        if data_alpha is None:
+            continue
+        # Land coverage and DSM serve as hypotheses
+        assert len(data_dyn.data.shape) == 3 and len(data_dsm.data.shape) == 3 and data_dyn.data.shape[1:] == data_dsm.data.shape[1:]
+        hypotheses.append(np.concatenate([data_dyn.data, data_dsm.data], axis=0))
+        
+        f_dat = data_alpha.data
+        f_dat[~np.isfinite(f_dat)] = np.nan
+        features.append(f_dat)    
+        sentinel.append(data_sent.data)
+
+    return sentinel, features, hypotheses
+
 def plot_distr_embeddings(path_folder=path_dict['data_folder'], name='sample-0', verbose=0):
     (file_sent, file_alpha, file_dynamic, file_worldclimbio, file_dsm) = get_images_from_name(path_folder=path_folder, name=name)
     path_sent = os.path.join(path_folder, file_sent) if file_sent is not None else None
@@ -538,5 +570,11 @@ def plot_distr_embeddings(path_folder=path_dict['data_folder'], name='sample-0',
             curr_ax.hist(im_plot_alpha[band, ...].to_numpy().flatten(), bins=np.linspace(0, 1, 41), alpha=0.5, label=f'Band {band}',
                          histtype='stepfilled', density=True, color=plt.cm.viridis(jj / len(bands)))
         curr_ax.set_xlim(-0.1, 1.1)
+
+def plot_sent_feat(sentinel_patch, ax=None):
+    if ax is None:
+        ax = plt.subplot(111)
+    ax.imshow(np.clip(np.swapaxes(np.swapaxes(sentinel_patch[:3], 0, 2), 0, 1), 0, 3000) / 3000)
+
 if __name__ == "__main__":
     print('This is a utility script for creating and processing the dataset.')
