@@ -207,3 +207,4 @@ marimo/_lsp/
 __marimo__/
 content/api_keys.py
 .DS_Store
+.vscode/settings.json

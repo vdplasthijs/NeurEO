@@ -239,13 +239,15 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
     return im_gee, filepath
 
 def download_list_coord(coord_list, path_save=None, 
-                        name_group='sample', start_index=0,
+                        name_group='sample', start_index=0, stop_index=None,
                         list_collections=['sentinel2', 'alphaearth', 'dynamicworld', 'worldclimbio', 'dsm']):
     assert type(coord_list) == list
     inds_none = []
     for i, coords in enumerate(tqdm(coord_list)):
         if i < start_index:
             continue
+        if stop_index is not None and i >= stop_index:
+            break
         name = f'{name_group}-{i}'
         for im_collection in list_collections:
             try:

@@ -31,3 +31,12 @@ def correlation_two_matrices(mat1, mat2):
         for i2 in range(n2):
             corr_mat[i1, i2] = np.corrcoef(mat1[i1, :], mat2[i2, :])[0, 1]
     return corr_mat
+
+def ravel_features(features):
+    assert len(features.shape) == 4
+    n_patches, n_features, nx, ny = features.shape
+    return np.swapaxes(features, 0, 1).reshape((n_features, -1))
+
+def unravel_features(raveled, n_patches, nx, ny):
+    n_features = raveled.shape[0]
+    return np.swapaxes(raveled.reshape((n_features, n_patches, nx, ny)), 0, 1)
