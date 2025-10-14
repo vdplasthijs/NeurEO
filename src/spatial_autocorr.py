@@ -13,7 +13,7 @@ path_dict_pecl = loadpaths.loadpaths()
 # import ast, shutil
 
 def compute_range_for_band(band_array, transform, 
-                           model='spherical',
+                           model='spherical', bin_func='uniform',
                            maxlag=2000, n_subsample=5000):
     """Compute spatial correlation length (range) in meters."""
     # Get valid pixels
@@ -29,14 +29,13 @@ def compute_range_for_band(band_array, transform,
 
     # Compute variogram
     V = Variogram(coords, values, model=model, maxlag=maxlag, 
-                  n_lags=20, bin_func='uniform')
+                  n_lags=20, bin_func=bin_func)
     return V, V.describe()['effective_range']
 
-if __name__ == "__main__":
-    path_folder = '/Users/tplas/data/2025-10 neureo/pecl-100-subsample-30km'
-    prefix_name = 'pecl176-'
-    save_folder = '/Users/tplas/repos/NeurEO/outputs/'
-    save_name = 'spatial_autocorr_pecl100-30km.npy'
+def compute_range_for_all_patches(model='spherical', n_subsample=500, maxlag=1280, bin_func='uniform',
+                    path_folder = '/Users/tplas/data/2025-10 neureo/pecl-100-subsample-30km',   
+                    prefix_name = 'pecl176-', save_folder = '/Users/tplas/repos/NeurEO/outputs/'):
+    save_name = f'spatial_autocorr_pecl100-30km_{model}_{n_subsample}_{maxlag}.npy'
     assert os.path.exists(path_folder), path_folder
     assert os.path.exists(save_folder), save_folder
 
@@ -51,8 +50,8 @@ if __name__ == "__main__":
     for i in tqdm(range(n_patches)):
         for j in range(n_features):
             band_array = features[i][j]
-            V, effective_range = compute_range_for_band(band_array, 10, n_subsample=600,
-                                                        model='spherical')
+            V, effective_range = compute_range_for_band(band_array, 10, n_subsample=n_subsample,
+                                                        model=model, maxlag=maxlag, bin_func=bin_func)
             mat_effective_range[i, j] = effective_range
         ## temp save:
         np.save(os.path.join(save_folder, save_name), mat_effective_range)
@@ -60,3 +59,6 @@ if __name__ == "__main__":
     # Final save
     np.save(os.path.join(save_folder, save_name), mat_effective_range)
     print(f"Saved spatial autocorrelation ranges to {os.path.join(save_folder, save_name)}")
+
+if __name__ == "__main__":
+    compute_range_for_all_patches()
