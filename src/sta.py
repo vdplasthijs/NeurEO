@@ -44,50 +44,31 @@ N_features = features[0].shape[0]
 N_pixels = features[0].shape[1]
 N_hypotheses = hypotheses[0].shape[0]
 
-# Precalculate for each pixel which values need to be read and written
-read = np.zeros([N_pixels, N_pixels, 2, 2], dtype=int)
-write = np.zeros([N_pixels, N_pixels, 2, 2], dtype=int)
-for row in range(N_pixels):
-    for col in range(N_pixels):
-        # Choose region of this band to read out
-        read[row, col, 0, 0] = max(0, row - radius) # row start
-        read[row, col, 0, 1] = min(row + radius + 1, N_pixels) # row stop
-        read[row, col, 1, 0] = max(0, col - radius) # col start
-        read[row, col, 1, 1] = min(col + radius + 1, N_pixels) # col stop
-        # Choose where in the roi to write this to
-        write[row, col, 0, 0] = read[row, col, 0, 0] - (row-radius)
-        write[row, col, 0, 1] = write[row, col, 0, 0] + (read[row, col, 0, 1] - read[row, col, 0, 0])
-        write[row, col, 1, 0] = read[row, col, 1, 0] - (col - radius)
-        write[row, col, 1, 1] = write[row, col, 1, 0] + (read[row, col, 1, 1] - read[row, col, 1, 0])
-
 # Run through all patches, collecting spike triggered averages for each feature for each hypothesis
 patch_stas = []
 for p, (hypothesis, feature) in enumerate(zip(hypotheses, features)):
     print(f'Analysing patch {p+1} / {len(hypotheses)}')
-    # Set border to ignore on all sides, to avoid empty pixels
-    border = 0
     
     # Create empty region of interest maps: area around each pixel for each band
-    rois = np.full([N_hypotheses, N_pixels - 2 * border, N_pixels - 2 * border,
+    rois = np.full([N_hypotheses, N_pixels - 2 * radius, N_pixels - 2 * radius,
                     radius * 2 + 1, radius * 2 + 1], np.nan)
     
     # Collect searchlight data for each pixel from all bands of current modality
     for h, hyp in enumerate(hypothesis):
         print(f'Copying hyp {h} / {len(hypotheses)}')
-        for i, row in enumerate(range(border, N_pixels - border)):
-            for j, col in enumerate(range(border, N_pixels - border)):
+        for row in range(radius, N_pixels - radius):
+            for col in range(radius, N_pixels - radius):
                 # Grab the relevant pixels from the band
-                rois[h, i, j, write[row, col, 0, 0]:write[row, col, 0, 1], write[row, col, 1, 0]:write[row, col, 1, 1]] = \
-                    hyp[read[row, col, 0, 0]:read[row, col, 0, 1], read[row, col, 1, 0]:read[row, col, 1, 1]]
+                rois[h, row - radius, col - radius, :, :] = \
+                    hyp[(row - radius):(row + radius + 1), (col - radius):(col + radius + 1)]
                     
     # Collect spike time averages for each band
     stas = []
     for h, hyp_rois in enumerate(rois):
         print(f'Calculating spike triggered averages for hyp {h} / {len(rois)}')
         # Then create the spike time average: multiply each roi by the pixel value of the feature pixel
-        hyp_stas = [hyp_rois * d[border:(N_pixels-border),border:(N_pixels-border),None,None] for d in feature]
+        hyp_stas = [hyp_rois * d[radius:(N_pixels-radius),radius:(N_pixels-radius),None,None] for d in feature]
         # Then average across all pixels and stack to get big output array
-        import pdb; pdb.set_trace()
         hyp_stas = np.stack([np.nansum(sta.reshape([-1, radius*2+1, radius*2+1]), axis=0) for sta in hyp_stas])
         # And append to output stas
         stas.append(hyp_stas)
