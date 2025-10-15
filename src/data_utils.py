@@ -23,7 +23,7 @@ import loadpaths
 path_dict = loadpaths.loadpaths()
 sys.path.append(os.path.join(path_dict['repo'], 'content/'))
 
-ONLINE_ACCESS_TO_GEE = True 
+ONLINE_ACCESS_TO_GEE = False 
 if ONLINE_ACCESS_TO_GEE:
     import api_keys
     import ee, geemap 
@@ -298,6 +298,10 @@ def naked(ax):
     ax.set_yticks([])
     ax.set_xlabel('')
     ax.set_ylabel('')
+
+def despine(ax):
+    for sp in ['top', 'right']:
+        ax.spines[sp].set_visible(False)
 
 def plot_image_simple(im, ax=None, name_file=None, use_im_extent=False, verbose=0):
     '''Plot image (as np array or xr DataArray)'''
