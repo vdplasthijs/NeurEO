@@ -29,6 +29,7 @@ patches = 200
 hypotheses = []
 features = []
 for p in range(patches):
+    print(f'Loading patch {p} / {patches}')
     # Load all data, both features and hypotheses, for the current patch
     (data_sent, data_alpha, data_dyn, data_worldclim, data_dsm) = du.load_all_modalities_from_name(name=f'pecl176-{p}', 
                                                                         path_folder='../content/pecl-100-subsample-30km', verbose=0)    
@@ -53,10 +54,10 @@ hyp_std = np.stack([np.nanstd(h) for h in np.stack(hypotheses, axis=-1)])
 hypotheses = [(h - hyp_m[:,None,None])/hyp_std[:,None,None] for h in hypotheses]
 
 # Get names of hypotheses: different coarse land coverage classes
-names = [k for k in du.create_cmap_dynamic_world().keys()]
+names = [k for k in du.create_cmap_dynamic_world().keys()] + ['dsm']
 
 # Extract relevant dimensions
-radius = 5 # pixels, excluding center pixel (so diameter = 2 * radius + 1)
+radius = 10 # pixels, excluding center pixel (so diameter = 2 * radius + 1)
 N_features = features[0].shape[0]
 N_pixels = features[0].shape[1]
 N_hypotheses = hypotheses[0].shape[0]
@@ -121,10 +122,12 @@ for p, (hypothesis, feature) in enumerate(zip(hypotheses, features)):
     
 # Average across patches to get final stas
 all_stas = np.nanmean(np.stack(patch_stas), axis=0)
+# Save as npy file
+np.save('../outputs/sta_dat.npy', all_stas)
 
 # Plot a selection
 h_to_plot = len(all_stas)
-f_to_plot = 32
+f_to_plot = N_features
 plt.figure(figsize=(f_to_plot, h_to_plot))
 # Color plot borders by average value
 lim = np.nanmax(np.abs(all_stas[:h_to_plot, :f_to_plot]))
@@ -144,6 +147,7 @@ for row, hyp_stas in enumerate(all_stas[:h_to_plot]):
             ax.set_ylabel(names[row].replace('_','\n'), rotation=0, labelpad=20)
         if row == 0:
             ax.set_title(f'F{col}')
+plt.savefig('../outputs/sta_dat.png')
             
 # Plot the map for a particular feature that you might like across patches
 cols=4
@@ -157,9 +161,6 @@ for p, feature in enumerate(features):
     plt.axis('off')
 
 # Fit a gaussian to each sta
-f_to_plot=10
-h_to_plot=5
-
 x, y = np.meshgrid(np.arange(2*radius+1), np.arange(2*radius+1))
 # Collect fitted parameters and resulting images
 all_params = np.full(list(all_stas.shape[:-2]) + [7], np.nan)
@@ -183,8 +184,8 @@ for row, hyp_stas in enumerate(all_stas[:h_to_plot]):
             # The location where the second derivative is nearest to 0
             curve = np.mean(sta, axis=0)
             curve = np.diff(np.diff(np.mean(sta, axis=0)))
-            sx_0 = np.abs(x_0 - np.argmin(np.abs(np.diff(np.diff(np.mean(sta, axis=0))))) - 1) # -1 because diff loses dim
-            sy_0 = np.abs(y_0 - np.argmin(np.abs(np.diff(np.diff(np.mean(sta, axis=1))))) - 1)
+            sx_0 = max(1e-3, np.abs(x_0 - np.argmin(np.abs(np.diff(np.diff(np.mean(sta, axis=0))))) - 1)) # -1 because diff loses dim
+            sy_0 = max(1e-3, np.abs(y_0 - np.argmin(np.abs(np.diff(np.diff(np.mean(sta, axis=1))))) - 1))
             theta_0 = 0.0
             # Do the actual fit
             try:
@@ -202,24 +203,34 @@ for row, hyp_stas in enumerate(all_stas[:h_to_plot]):
                 # Store the resulting parameters and fit
                 curr_fits.append(np.zeros_like(sta))
                 curr_pars.append(np.zeros(7))
-        # if row == 1 and col == 5:
-        #     import pdb; pdb.set_trace()
         # Only keep the best fit, between the positive and negative peak
         best_fit = int(np.sum(np.square(sta - curr_fits[0])) > np.sum(np.square(sta - curr_fits[1])))
         # Keep the best fit between min and max
         all_params[row, col, :] = curr_pars[best_fit]
         all_fits[row, col, :, :] = curr_fits[best_fit]
 
-# Plot the fits
+# Save as npy file
+np.save('../outputs/sta_fit.npy', all_fits)
+np.save('../outputs/sta_par.npy', all_params)
+
+# Plot a selection
 plt.figure(figsize=(f_to_plot, h_to_plot))
+# Color plot borders by average value
+lim = np.nanmax(np.abs(all_fits[:h_to_plot, :f_to_plot]))
+cm = colormaps.get_cmap('RdBu_r')
 # Plot one tuning curve per hypothesis per feature
 for row, hyp_fits in enumerate(all_fits[:h_to_plot]):
     for col, fit in enumerate(hyp_fits[:f_to_plot]):
         ax = plt.subplot(h_to_plot, f_to_plot, row * f_to_plot + col + 1)
-        ax.imshow(fit)
+        ax.imshow(fit,cmap='Greys')
+        ax.add_patch(Rectangle([0, 0,], fit.shape[1]-1, fit.shape[0]-1,
+            facecolor=[0,0,0,0], 
+            edgecolor=cm((np.nanmean(fit)+lim)/(2*lim)),
+            linewidth=4))
         ax.set_xticks([])
         ax.set_yticks([])
         if col == 0:
             ax.set_ylabel(names[row].replace('_','\n'), rotation=0, labelpad=20)
         if row == 0:
             ax.set_title(f'F{col}')
+plt.savefig('../outputs/sta_fit.png')            
