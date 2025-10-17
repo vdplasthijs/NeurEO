@@ -13,6 +13,16 @@ from matplotlib import colormaps
 from matplotlib.patches import Rectangle
 import scipy.optimize as opt
 
+# Quick utility function for fitting 2d gaussians
+# See https://stackoverflow.com/a/77432576/8919448
+def gauss_2d(xy, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
+    x, y = xy
+    a = (np.cos(theta)**2)/(2*sigma_x**2) + (np.sin(theta)**2)/(2*sigma_y**2)
+    b = -(np.sin(2*theta))/(4*sigma_x**2) + (np.sin(2*theta))/(4*sigma_y**2)
+    c = (np.sin(theta)**2)/(2*sigma_x**2) + (np.cos(theta)**2)/(2*sigma_y**2)
+    g = offset + amplitude*np.exp( - (a*((x-xo)**2) + 2*b*(x-xo)*(y-yo)
+                            + c*((y-yo)**2)))
+    return g.ravel()
 
 # Then collect from all patches the alpha and dyn data
 patches = 10
@@ -131,12 +141,78 @@ for row, hyp_stas in enumerate(all_stas[:h_to_plot]):
 # Plot the map for a particular feature that you might like across patches
 cols=4
 rows=int(np.ceil(patches/cols))
-curr_f = 0
+curr_f = 12
 lim = np.nanmax(np.abs(np.stack(features, axis=-1)[curr_f]))
 plt.figure(figsize=(2*cols, 2*rows))
 for p, feature in enumerate(features):
     plt.subplot(rows, cols, p + 1)
     plt.imshow(feature[curr_f], vmin=-lim, vmax=lim, cmap="RdBu_r")
     plt.axis('off')
-    
-#
+
+# Fit a gaussian to each sta
+f_to_plot=10
+h_to_plot=5
+
+x, y = np.meshgrid(np.arange(2*radius+1), np.arange(2*radius+1))
+# Collect fitted parameters and resulting images
+all_params = np.full(list(all_stas.shape[:-2]) + [7], np.nan)
+all_fits = np.full(all_stas.shape, np.nan)
+for row, hyp_stas in enumerate(all_stas[:h_to_plot]):
+    print(f'Fitting Gaussians to hyp {row} / {N_hypotheses}')
+    for col, sta in enumerate(hyp_stas[:f_to_plot]):
+        curr_fits = []
+        curr_pars = []
+        for fit_type in ['pos', 'neg']:
+            # Set fit type dependent initial guesses: amplitude, offset, center
+            if fit_type == 'pos':       
+                a_0 = np.max(sta) - np.min(sta)
+                (y_0, x_0) = np.unravel_index(sta.argmax(), sta.shape)
+                o_0 = np.min(sta)
+            else:
+                a_0 = np.min(sta) - np.max(sta)
+                (y_0, x_0) = np.unravel_index(sta.argmin(), sta.shape)
+                o_0 = np.max(sta)
+            # Estimate the std as the pixel distance between the peak and the inflexion point:
+            # The location where the second derivative is nearest to 0
+            curve = np.mean(sta, axis=0)
+            curve = np.diff(np.diff(np.mean(sta, axis=0)))
+            sx_0 = np.abs(x_0 - np.argmin(np.abs(np.diff(np.diff(np.mean(sta, axis=0))))) - 1) # -1 because diff loses dim
+            sy_0 = np.abs(y_0 - np.argmin(np.abs(np.diff(np.diff(np.mean(sta, axis=1))))) - 1)
+            theta_0 = 0.0
+            # Do the actual fit
+            try:
+                # find the optimal Gaussian parameters
+                popt, pcov = opt.curve_fit(gauss_2d, (x, y), sta.ravel(), 
+                                           p0=(a_0, x_0, y_0, sx_0, sy_0, theta_0, o_0),
+                                           maxfev=int(1e5))   
+                # Store the resulting parameters and fit
+                curr_fits.append(gauss_2d((x, y), *popt).reshape(2*radius+1,2*radius+1))
+                curr_pars.append(popt)
+            except RuntimeError as e:
+                # This generally happens when we run out of iterations
+                # That's usually caused by strongly non-gaussian stas. Let's just ignore those
+                print(f'Gaussian fit failed for type {fit_type}, hyp {row}, feature {col}. \n Error message: {e}')
+                # Store the resulting parameters and fit
+                curr_fits.append(np.zeros_like(sta))
+                curr_pars.append(np.zeros(7))
+        # if row == 1 and col == 5:
+        #     import pdb; pdb.set_trace()
+        # Only keep the best fit, between the positive and negative peak
+        best_fit = int(np.sum(np.square(sta - curr_fits[0])) > np.sum(np.square(sta - curr_fits[1])))
+        # Keep the best fit between min and max
+        all_params[row, col, :] = curr_pars[best_fit]
+        all_fits[row, col, :, :] = curr_fits[best_fit]
+
+# Plot the fits
+plt.figure(figsize=(f_to_plot, h_to_plot))
+# Plot one tuning curve per hypothesis per feature
+for row, hyp_fits in enumerate(all_fits[:h_to_plot]):
+    for col, fit in enumerate(hyp_fits[:f_to_plot]):
+        ax = plt.subplot(h_to_plot, f_to_plot, row * f_to_plot + col + 1)
+        ax.imshow(fit)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        if col == 0:
+            ax.set_ylabel(names[row].replace('_','\n'), rotation=0, labelpad=20)
+        if row == 0:
+            ax.set_title(f'F{col}')
