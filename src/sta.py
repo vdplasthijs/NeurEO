@@ -25,17 +25,24 @@ def gauss_2d(xy, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
     return g.ravel()
 
 # Then collect from all patches the alpha and dyn data
-patches = 10
+patches = 200
 hypotheses = []
 features = []
 for p in range(patches):
-    (data_sent, data_alpha, data_dyn, data_worldclim, data_dsm) = du.load_all_modalities_from_name(name=f'pecl-fig-{p}', path_folder='../content/sample_data', verbose=1)
-    # Land coverage serves as hypotheses
-    hypotheses.append(data_dyn.data)
+    # Load all data, both features and hypotheses, for the current patch
+    (data_sent, data_alpha, data_dyn, data_worldclim, data_dsm) = du.load_all_modalities_from_name(name=f'pecl176-{p}', 
+                                                                        path_folder='../content/pecl-100-subsample-30km', verbose=0)    
+    if data_sent is None:
+        continue
+    # Land coverage and DSM serve as hypotheses
+    assert len(data_dyn.data.shape) == 3 and len(data_dsm.data.shape) == 3 and data_dyn.data.shape[1:] == data_dsm.data.shape[1:]
+    hypotheses.append(np.concatenate([data_dyn.data, data_dsm.data], axis=0))
     # This can definitely be cleaner but I use nan for undefined values
     f_dat = data_alpha.data
     f_dat[~np.isfinite(f_dat)] = np.nan
     features.append(f_dat)    
+# Some patches were undefined so set number to correct value
+patches = len(features)
 
 # Z-score across patches for each feature and each hypothesis
 feat_m = np.stack([np.nanmean(f) for f in np.stack(features, axis=-1)])
