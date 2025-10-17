@@ -70,6 +70,34 @@ for p, (hypothesis, feature) in enumerate(zip(hypotheses, features)):
         hyp_stas = [hyp_rois * d[radius:(N_pixels-radius),radius:(N_pixels-radius),None,None] for d in feature]
         # Then average across all pixels and stack to get big output array
         hyp_stas = np.stack([np.nansum(sta.reshape([-1, radius*2+1, radius*2+1]), axis=0) for sta in hyp_stas])
+        # Also average the hypothesis itself across all pixels
+        hyp_norm = np.nansum(np.reshape(hyp_rois, [-1, radius*2+1, radius*2+1]),axis=0)
+        # Regress out the contribution of simple hypothesis geometry from responses
+        X = np.stack([np.ones(hyp_norm.size), hyp_norm.reshape(-1)], axis=-1)
+        Y = hyp_stas.reshape([N_features,-1]).T
+        b = np.linalg.pinv(X) @ Y
+        e = Y - X@b
+        corr_stas = e.T.reshape([N_features, radius * 2 + 1, radius * 2 + 1])
+        # Plot for debugging purposes
+        if False:
+            plt.figure();
+            for r in range(8):
+                for c in range(8):
+                    plt.subplot(8,8,r*8+c+1)
+                    plt.imshow(feature[r*8+c])
+            plt.figure();
+            for r in range(8):
+                for c in range(8):
+                    plt.subplot(8,8,r*8+c+1)
+                    plt.imshow(hyp_stas[r*8+c])
+            plt.figure();
+            for r in range(8):
+                for c in range(8):
+                    plt.subplot(8,8,r*8+c+1)
+                    plt.imshow(corr_stas[r*8+c])
+            plt.figure(); plt.imshow(hypothesis[h])
+            plt.figure(); plt.imshow(hyp_norm)       
+            import pdb; pdb.set_trace()             
         # And append to output stas
         stas.append(hyp_stas)
     patch_stas.append(np.stack(stas))
