@@ -68,6 +68,13 @@ def create_cmap_dynamic_world():
     }
     return dict_classes
 
+def get_hyp_names(include_dsm=True):
+    color_dict_dw = create_cmap_dynamic_world()
+    hyp_names = list(color_dict_dw.keys())
+    if include_dsm:
+        hyp_names.append('dsm')
+    return hyp_names
+
 def create_timestamp(include_seconds=False):
     dt = datetime.datetime.now()
     timestamp = str(dt.date()) + '-' + str(dt.hour).zfill(2) + str(dt.minute).zfill(2)
