@@ -31,6 +31,7 @@ def gauss_2d(xy, amplitude, xo, yo, sigma_x, sigma_y, theta, offset):
 patches = 200
 hypotheses = []
 features = []
+pictures = []
 for p in range(patches):
     print(f'Loading patch {p} / {patches}')
     # Load all data, both features and hypotheses, for the current patch
@@ -45,6 +46,7 @@ for p in range(patches):
     f_dat = data_alpha.data
     f_dat[~np.isfinite(f_dat)] = np.nan
     features.append(f_dat)    
+    pictures.append(data_sent)
 # Some patches were undefined so set number to correct value
 patches = len(features)
 
@@ -60,7 +62,7 @@ hypotheses = [(h - hyp_m[:,None,None])/hyp_std[:,None,None] for h in hypotheses]
 names = [k for k in du.create_cmap_dynamic_world().keys()] + ['dsm']
 
 # Extract relevant dimensions
-radius = 5 # pixels, excluding center pixel (so diameter = 2 * radius + 1)
+radius = 10 # pixels, excluding center pixel (so diameter = 2 * radius + 1)
 N_features = features[0].shape[0]
 N_pixels = features[0].shape[1]
 N_hypotheses = hypotheses[0].shape[0]
@@ -68,8 +70,8 @@ N_hypotheses = hypotheses[0].shape[0]
 ### LOAD OR RUN ANALYSIS ###
 
 # Load stas and fits, or recalculate them
-load = False
-base_dir = '../outputs/radius05'
+load = True
+base_dir = '../outputs/radius10'
 if load:
     all_stas = np.load(os.path.join(base_dir, 'sta_dat.npy'))
     all_fits = np.load(os.path.join(base_dir, 'sta_fit.npy'))
@@ -130,7 +132,7 @@ else:
                 plt.figure(); plt.imshow(hyp_norm)       
                 import pdb; pdb.set_trace()             
             # And append to output stas
-            stas.append(hyp_stas)
+            stas.append(corr_stas)
         patch_stas.append(np.stack(stas))
         
     # Average across patches to get final stas
@@ -162,8 +164,8 @@ else:
                 # The location where the second derivative is nearest to 0
                 curve = np.mean(sta, axis=0)
                 curve = np.diff(np.diff(np.mean(sta, axis=0)))
-                sx_0 = max(1e-3, np.abs(x_0 - np.argmin(np.abs(np.diff(np.diff(np.mean(sta, axis=0))))) - 1)) # -1 because diff loses dim
-                sy_0 = max(1e-3, np.abs(y_0 - np.argmin(np.abs(np.diff(np.diff(np.mean(sta, axis=1))))) - 1))
+                sx_0 = max(1, np.abs(x_0 - np.argmin(np.abs(np.diff(np.diff(np.mean(sta, axis=0))))) - 1)) # -1 because diff loses dim
+                sy_0 = max(1, np.abs(y_0 - np.argmin(np.abs(np.diff(np.diff(np.mean(sta, axis=1))))) - 1))
                 theta_0 = 0.0
                 # Do the actual fit
                 try:
@@ -199,16 +201,11 @@ f_to_plot = N_features
 plt.figure(figsize=(f_to_plot, h_to_plot))
 # Color plot borders by average value
 lim = np.nanmax(np.abs(all_stas[:h_to_plot, :f_to_plot]))
-cm = colormaps.get_cmap('RdBu_r')
 # Plot one tuning curve per hypothesis per feature
 for row, hyp_stas in enumerate(all_stas[:h_to_plot]):
     for col, sta in enumerate(hyp_stas[:f_to_plot]):
         ax = plt.subplot(h_to_plot, f_to_plot, row * f_to_plot + col + 1)
-        ax.imshow(sta,cmap='Greys')
-        ax.add_patch(Rectangle([0, 0,], sta.shape[1]-1, sta.shape[0]-1,
-            facecolor=[0,0,0,0], 
-            edgecolor=cm((np.nanmean(sta)+lim)/(2*lim)),
-            linewidth=4))
+        ax.imshow(sta,cmap='RdBu_r', vmin=-lim, vmax=lim)
         ax.set_xticks([])
         ax.set_yticks([])
         if col == 0:
@@ -216,7 +213,8 @@ for row, hyp_stas in enumerate(all_stas[:h_to_plot]):
         if row == 0:
             ax.set_title(f'F{col}')
 plt.tight_layout();
-plt.savefig(os.path.join(base_dir, 'sta_dat.png'))
+if not load:
+    plt.savefig(os.path.join(base_dir, 'sta_dat.png'))
             
 # Plot the map for a particular feature that you might like across patches
 cols=10
@@ -228,21 +226,27 @@ for p, feature in enumerate(features):
     plt.subplot(rows, cols, p + 1)
     plt.imshow(feature[curr_f], vmin=-lim, vmax=lim, cmap="RdBu_r")
     plt.axis('off')
+    
+# Plot the map for a particular hypothesis that you might like across patches
+cols=10
+rows=int(np.ceil(patches/cols))
+curr_h = 7
+lim = np.nanmax(np.abs(np.stack(hypotheses, axis=-1)[curr_h]))
+plt.figure(figsize=(2*cols, 2*rows))
+for p, hypothesis in enumerate(hypotheses):
+    plt.subplot(rows, cols, p + 1)
+    plt.imshow(hypothesis[curr_h], vmin=-lim, vmax=lim, cmap="RdBu_r")
+    plt.axis('off')    
 
 # Plot fits for the same stas
 plt.figure(figsize=(f_to_plot, h_to_plot))
 # Color plot borders by average value
 lim = np.nanmax(np.abs(all_fits[:h_to_plot, :f_to_plot]))
-cm = colormaps.get_cmap('RdBu_r')
 # Plot one tuning curve per hypothesis per feature
 for row, hyp_fits in enumerate(all_fits[:h_to_plot]):
     for col, fit in enumerate(hyp_fits[:f_to_plot]):
         ax = plt.subplot(h_to_plot, f_to_plot, row * f_to_plot + col + 1)
-        ax.imshow(fit,cmap='Greys')
-        ax.add_patch(Rectangle([0, 0,], fit.shape[1]-1, fit.shape[0]-1,
-            facecolor=[0,0,0,0], 
-            edgecolor=cm((np.nanmean(fit)+lim)/(2*lim)),
-            linewidth=4))
+        ax.imshow(fit, cmap='RdBu_r', vmin=-lim, vmax=lim)
         ax.set_xticks([])
         ax.set_yticks([])
         if col == 0:
@@ -250,12 +254,16 @@ for row, hyp_fits in enumerate(all_fits[:h_to_plot]):
         if row == 0:
             ax.set_title(f'F{col}')
 plt.tight_layout();            
-plt.savefig(os.path.join(base_dir, 'sta_fit.png'))         
+if not load:
+    plt.savefig(os.path.join(base_dir, 'sta_fit.png'))         
 
 # Make overviews of all parameter histograms
 plot_params = np.copy(all_params)
 plot_params[:,:,1] -= radius
 plot_params[:,:,2] -= radius
+plot_params[:,:,3] = np.abs(plot_params[:,:,3])
+plot_params[:,:,4] = np.abs(plot_params[:,:,4])
+plot_params[:,:,5] = np.mod(plot_params[:,:,5], 2*np.pi)
 param_names = ['Amplitude', 'Center x', 'Center y', 'Sigma x', 'Sigma y', 'Angle', 'Base'];
 param_N_bins = 20;
 param_bins = [np.linspace(np.percentile(plot_params[:,:,p], 10),
@@ -273,4 +281,181 @@ for h, hyp_par in enumerate(plot_params):
         if h < plot_params.shape[0] - 1:
             ax.set_xticks([])
 plt.tight_layout()
-plt.savefig(os.path.join(base_dir, 'sta_par.png'))         
+if not load:
+    plt.savefig(os.path.join(base_dir, 'sta_par.png'))      
+    
+# Repeat for features with reasonable peak locations and sigmas
+# This avoids fits where the sta is effectively a horizontal/vertical gradient
+# so you need a huge gaussian (large radius, large amplitude, far away) to fit it
+sta_to_plot = (np.abs(plot_params[:,:,1]) < radius*5) & \
+    (np.abs(plot_params[:,:,2]) < radius*5) & \
+    (plot_params[:,:,3] < radius * 5) & (plot_params[:,:,4] < radius * 5)
+error = np.mean(np.abs(all_stas - all_fits).reshape([N_hypotheses,N_features,-1]),axis=-1)
+filtered_params = np.copy(plot_params)
+filtered_params[~np.tile(sta_to_plot[:,:,None], [1,1,7])] = np.nan
+
+param_bins = [np.linspace(np.nanmin(filtered_params[:,:,p]), np.nanmax(filtered_params[:,:,p]), param_N_bins)
+              for p in range(filtered_params.shape[-1])]
+plt.figure(figsize=(2*plot_params.shape[-1], plot_params.shape[0]))
+for h, hyp_par in enumerate(filtered_params):
+    for p, (p_name, p_bins) in enumerate(zip(param_names, param_bins)):
+        ax = plt.subplot(plot_params.shape[0], plot_params.shape[-1], h*plot_params.shape[-1] + p + 1)
+        plt.hist(hyp_par[:,p], p_bins)
+        if p == 0:
+            ax.set_ylabel(names[h].replace('_','\n'), rotation=0, labelpad=20)
+        if h == 0:
+            ax.set_title(p_name)
+        if h < plot_params.shape[0] - 1:
+            ax.set_xticks([])
+plt.tight_layout()  
+
+# Calculate tuning strength to each hypothesis for each feature
+# It's a pretty rough estimate of tuning: 
+# How many stds is one hyp's amplitude from the mean of other hyp amplitudes
+tuning_strength = np.zeros((N_hypotheses, N_features))
+amp_feat = np.max(all_stas.reshape([N_hypotheses, N_features, -1]), axis=-1) - np.min(all_stas.reshape([N_hypotheses, N_features, -1]), axis=-1)
+for h in range(N_hypotheses):
+    hyp_self = np.eye(N_hypotheses)[h].astype(np.bool)
+    self_amp = amp_feat[h]
+    other_mean = np.nanmean(amp_feat[~hyp_self], axis=0)
+    other_std = np.nanstd(amp_feat[~hyp_self], axis=0)
+    tuning_strength[h,:] = np.abs(self_amp - other_mean) / other_std
+# Plot average response and significant tuning
+plt.figure()
+plt.subplot(2,1,1);
+plt.imshow(amp_feat)
+plt.colorbar()
+plt.subplot(2,1,2);
+plt.imshow(tuning_strength, vmin=0, vmax=2)
+plt.colorbar()
+
+# Plot distribution of strongest tuning across features
+sta_lim = np.nanmax(np.abs(all_stas))
+feat_lim = np.nanmax(np.abs(all_stas))
+plt.figure(figsize=(4,12));
+plt.subplot(4,1,1)
+plt.hist(np.max(tuning_strength, axis=0));
+plt.xlabel('Strongest hypothesis tuning')
+plt.ylabel('Nr of features')
+# Plot a strongly tuned example
+ax = plt.subplot(4,2,3);
+du.plot_image_simple(pictures[15], ax=ax)
+plt.title('Sentinel')
+plt.subplot(4,2,4);
+plt.imshow(hypotheses[15][7])
+plt.title('Bare hypothesis')
+# Plot the feature that shows strong bare tuning
+plt.subplot(4,2,5)
+plt.imshow(all_stas[7,9])
+plt.title('F9 bare sta')
+plt.subplot(4,2,6);
+plt.imshow(features[15][9])
+plt.title('F9 map')
+# Plot the feature that shows weak bare tuning
+plt.subplot(4,2,7)
+plt.imshow(all_stas[7,10])
+plt.title('F10 bare sta')
+plt.subplot(4,2,8);
+plt.imshow(features[15][10])
+plt.title('F10 map')
+
+# Calculate scale: average between x and y sigma, only from reasonable fits
+scale = np.mean(filtered_params[:,:,4:6], axis=-1)
+plt.figure()
+plt.imshow(scale)
+
+# Plot scale across stas
+plt.figure(figsize=(4,12));
+plt.subplot(4,1,1)
+plt.hist(scale[sta_to_plot]);
+plt.xlabel('Sta scale in pixels')
+plt.ylabel('Nr of stas')
+# Plot a short and long scale example
+ax = plt.subplot(4,2,3);
+du.plot_image_simple(pictures[4], ax=ax)
+plt.title('Sentinel')
+plt.subplot(4,2,4);
+plt.imshow(hypotheses[4][1])
+plt.title('Tree hypothesis')
+# Plot the feature with short scale
+plt.subplot(4,2,5)
+plt.imshow(all_stas[1,30])
+plt.title('F30 trees sta')
+plt.subplot(4,2,6);
+plt.imshow(features[4][30])
+plt.title('F30 map')
+# Plot the feature with long scale
+plt.subplot(4,2,7)
+plt.imshow(all_stas[1,36])
+plt.title('F36 trees sta')
+plt.subplot(4,2,8);
+plt.imshow(features[4][36])
+plt.title('F36 map')
+
+# Calculate displacement: peak to center distance
+displacement = np.sqrt(filtered_params[:,:,1]**2 + filtered_params[:,:,2]**2)
+plt.figure()
+plt.imshow(displacement)
+
+# Plot displacement across stas
+plt.figure(figsize=(4,12));
+plt.subplot(4,1,1)
+plt.hist(displacement[sta_to_plot]);
+plt.xlabel('Sta displacement in pixels')
+plt.ylabel('Nr of stas')
+# Plot a short and long scale example
+ax = plt.subplot(4,2,3);
+du.plot_image_simple(pictures[7], ax=ax)
+plt.title('Sentinel')
+plt.subplot(4,2,4);
+plt.imshow(hypotheses[7][2])
+plt.title('Grass hypothesis')
+# Plot the feature with small displacement
+plt.subplot(4,2,5)
+plt.imshow(all_stas[1,13])
+plt.title('F13 grass sta')
+plt.subplot(4,2,6);
+plt.imshow(features[7][13])
+plt.title('F13 map')
+# Plot the feature with large displacement
+plt.subplot(4,2,7)
+plt.imshow(all_stas[2,23])
+plt.title('F23 trees sta')
+plt.subplot(4,2,8);
+plt.imshow(features[7][23])
+plt.title('F23 map')
+
+# Calculate symmetry: eccentricity
+a = np.max(filtered_params[:,:,4:6], axis=-1)
+b = np.min(filtered_params[:,:,4:6], axis=-1)
+eccentricity = np.sqrt(1-(b/a)**2)
+plt.figure()
+plt.imshow(eccentricity)
+
+# Plot eccentricity across stas
+plt.figure(figsize=(4,12));
+plt.subplot(4,1,1)
+plt.hist(eccentricity[sta_to_plot]);
+plt.xlabel('Sta eccentricity')
+plt.ylabel('Nr of stas')
+# Plot a short and long scale example
+ax = plt.subplot(4,2,3);
+du.plot_image_simple(pictures[55], ax=ax)
+plt.title('Sentinel')
+plt.subplot(4,2,4);
+plt.imshow(hypotheses[55][0])
+plt.title('Water hypothesis')
+# Plot the feature with small eccentricity
+plt.subplot(4,2,5)
+plt.imshow(all_stas[0,24])
+plt.title('F24 water sta')
+plt.subplot(4,2,6);
+plt.imshow(features[55][24])
+plt.title('F24 map')
+# Plot the feature with large eccentiricty
+plt.subplot(4,2,7)
+plt.imshow(all_stas[0,49])
+plt.title('F49 water sta')
+plt.subplot(4,2,8);
+plt.imshow(features[55][49])
+plt.title('F49 map')
