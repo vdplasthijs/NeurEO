@@ -208,3 +208,4 @@ __marimo__/
 content/api_keys.py
 .DS_Store
 .vscode/settings.json
+*.code-workspace

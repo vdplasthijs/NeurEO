@@ -66,6 +66,7 @@ dependencies:
   - httpx=0.28.1
   - icu=73.1
   - idna=3.7
+  - imageio=2.37.0
   - ipykernel=6.30.1
   - ipython=9.5.0
   - ipython_pygments_lexers=1.1.1
@@ -92,6 +93,7 @@ dependencies:
   - jupyterlab_widgets=3.0.15
   - kealib=1.5.0
   - kiwisolver=1.4.8
+  - lazy_loader=0.4
   - lcms2=2.16
   - lerc=4.0.0
   - libaec=1.1.3
@@ -115,6 +117,7 @@ dependencies:
   - libopenblas=0.3.30
   - libpng=1.6.39
   - libpq=17.4
+  - libpysal=4.13.0
   - libsodium=1.0.20
   - libspatialite=5.1.0
   - libssh2=1.11.1
@@ -198,6 +201,7 @@ dependencies:
   - rfc3986-validator=0.1.1
   - rioxarray=0.18.1
   - rpds-py=0.22.3
+  - scikit-image=0.25.2
   - scikit-learn=1.7.2
   - scipy=1.16.2
   - send2trash=1.8.2
@@ -210,6 +214,7 @@ dependencies:
   - stack_data=0.6.3
   - terminado=0.18.1
   - threadpoolctl=3.5.0
+  - tifffile=2025.10.4
   - tiledb=2.3.3
   - tinycss2=1.4.0
   - tk=8.6.15
@@ -240,9 +245,11 @@ dependencies:
       - cachetools==6.2.1
       - earthengine-api==1.6.11
       - eerepr==0.1.2
+      - esda==2.8.0
       - future==1.0.0
       - geemap==0.36.4
       - geocoder==1.38.1
+      - giddy==2.3.6
       - google-api-core==2.26.0
       - google-api-python-client==2.184.0
       - google-auth==2.41.1
@@ -257,7 +264,10 @@ dependencies:
       - ipyfilechooser==0.6.0
       - ipyleaflet==0.20.0
       - jupyter-leaflet==0.20.0
+      - llvmlite==0.45.1
+      - mpmath==1.3.0
       - narwhals==2.8.0
+      - numba==0.62.1
       - plotly==6.3.1
       - proto-plus==1.26.1
       - protobuf==6.32.1
@@ -267,9 +277,15 @@ dependencies:
       - pyperclip==1.11.0
       - pyshp==3.0.2.post1
       - python-box==7.3.2
+      - quantecon==0.10.1
       - ratelim==0.1.6
       - rsa==4.9.1
+      - scikit-gstat==1.0.21
       - scooby==0.10.2
+      - seaborn==0.13.2
+      - splot==1.1.7
+      - spreg==1.8.3
+      - sympy==1.14.0
       - traittypes==0.2.1
       - uritemplate==4.2.0
 prefix: /opt/anaconda3/envs/neureo
