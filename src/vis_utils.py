@@ -220,16 +220,20 @@ def plot_sent_feat(sentinel_patch, ax=None):
         ax = plt.subplot(111)
     ax.imshow(np.clip(np.swapaxes(np.swapaxes(sentinel_patch[:3], 0, 2), 0, 1), 0, 3000) / 3000)
 
-def plot_feature(feat, ax=None, plot_cbar=False, cax=None):
+def plot_feature(feat, ax=None, plot_cbar=False, cax=None, lim_zscore=True):
+    if lim_zscore:
+        lim = 3.5
+    else:
+        lim = 0.4
     if ax is None:
-        im = plt.imshow(feat, cmap='BrBG', vmin=-3.5, vmax=3.5, interpolation='none')
+        im = plt.imshow(feat, cmap='BrBG', vmin=-lim, vmax=lim, interpolation='none')
         plt.axis('off')
     else:
-        im = ax.imshow(feat, cmap='BrBG', vmin=-3.5, vmax=3.5, interpolation='none')
+        im = ax.imshow(feat, cmap='BrBG', vmin=-lim, vmax=lim, interpolation='none')
         ax.axis('off')
     if plot_cbar:
         cbar = ax.figure.colorbar(im, cax=cax, ax=ax, location='left', fraction=0.046, pad=0.04)
-        cbar.set_label('Embed.')
+        cbar.set_label('Embed.\n(z-scored)' if lim_zscore else 'Embed.')
 
 def plot_sta(sta, ax=None, plot_cbar=False, cax=None):
     lim = 720
