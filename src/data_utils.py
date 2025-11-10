@@ -15,7 +15,8 @@ import datetime
 # from shapely.errors import ShapelyDeprecationWarning
 # warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning) 
 # import geopandas as gpd
-from tqdm import tqdm
+from tqdm import tqdm, trange
+from skimage import exposure
 # import scipy 
 # import scipy.spatial, scipy.cluster
 import loadpaths
@@ -355,14 +356,15 @@ def load_all_modalities_from_name(path_folder=path_dict['data_folder'], name='sa
     return im_loaded_s2, im_loaded_alpha, im_loaded_dynamic, im_loaded_worldclimbio, im_loaded_dsm
 
 def load_all_data(path_folder='/Users/tplas/data/2025-10 neureo/pecl-100-subsample-30km', 
-                  prefix_name='pecl176-'):
+                  prefix_name='pecl176-', rotate_90deg=False, zscore_features=False, 
+                  zscore_hypotheses=False, equalize_sentinel=False):
     assert os.path.exists(path_folder), path_folder
     
     patches = len(os.listdir(path_folder))  ## overestimate, doesnt matter.
     hypotheses = []
     features = []
     sentinel = []
-    for p in range(patches):
+    for p in trange(patches):
         (data_sent, data_alpha, data_dyn, data_worldclim, data_dsm) = load_all_modalities_from_name(name=f'{prefix_name}{p}', 
                                                                                 path_folder=path_folder, verbose=0)
 
@@ -370,14 +372,40 @@ def load_all_data(path_folder='/Users/tplas/data/2025-10 neureo/pecl-100-subsamp
             continue
         # Land coverage and DSM serve as hypotheses
         assert len(data_dyn.data.shape) == 3 and len(data_dsm.data.shape) == 3 and data_dyn.data.shape[1:] == data_dsm.data.shape[1:]
-        hypotheses.append(np.concatenate([data_dyn.data, data_dsm.data], axis=0))
-        
+        hyp_tmp = np.concatenate([data_dyn.data, data_dsm.data], axis=0)
         f_dat = data_alpha.data
-        f_dat[~np.isfinite(f_dat)] = np.nan
+        f_dat[~np.isfinite(f_dat)] = np.nan        
+        if rotate_90deg:
+            hyp_tmp = np.rot90(hyp_tmp, k=1, axes=(1, 2))  # rotate counter-clockwise 90 degrees
+            f_dat = np.rot90(f_dat, k=1, axes=(1, 2))  # rotate counter-clockwise 90 degrees
+        hypotheses.append(hyp_tmp)
         features.append(f_dat)    
         sentinel.append(data_sent.data)
 
-    return sentinel, features, hypotheses
+    if zscore_features:
+        # Z-score across patches for each feature and each hypothesis
+        feat_m = np.stack([np.nanmean(f) for f in np.stack(features, axis=-1)])
+        feat_std = np.stack([np.nanstd(f) for f in np.stack(features, axis=-1)])
+        features = [(f - feat_m[:,None,None])/feat_std[:,None,None] for f in features]
+    if zscore_hypotheses:
+        hyp_m = np.stack([np.nanmean(h) for h in np.stack(hypotheses, axis=-1)])
+        hyp_std = np.stack([np.nanstd(h) for h in np.stack(hypotheses, axis=-1)])
+        hypotheses = [(h - hyp_m[:,None,None])/hyp_std[:,None,None] for h in hypotheses]
+    if equalize_sentinel:
+        ## equalize histogram across patches for better visualization
+        sentinel_eq = np.stack(sentinel, -1)
+        # sentinel_eq.shape
+        sentinel_eq = sentinel_eq[:3, ...]
+        # sentinel_eq = np.swapaxes(np.swapaxes(sentinel_eq, 1, 3), 1, 2)
+        sentinel_eq = sentinel_eq.reshape([3, sentinel_eq.shape[1], -1])
+        # # sentinel_eq = np.clip(sentinel_eq, 0, 3000) / 3000
+        sentinel_eq = exposure.equalize_hist(sentinel_eq)
+        sentinel_eq = sentinel_eq.reshape([3, sentinel_eq.shape[1], sentinel_eq.shape[1], -1])
+        sentinel_eq = [sentinel_eq[:, :, :, i] for i in range(sentinel_eq.shape[-1])]
+    else:
+        sentinel_eq = None
+
+    return sentinel, sentinel_eq, features, hypotheses
 
 if __name__ == "__main__":
     print('This is a utility script for creating and processing the dataset.')

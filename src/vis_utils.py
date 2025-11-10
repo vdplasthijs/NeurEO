@@ -7,6 +7,7 @@ import rasterio, rasterio.plot
 import xarray as xr
 import rioxarray as rxr
 from collections import Counter
+from skimage import exposure
 
 
 import loadpaths
@@ -218,3 +219,101 @@ def plot_sent_feat(sentinel_patch, ax=None):
     if ax is None:
         ax = plt.subplot(111)
     ax.imshow(np.clip(np.swapaxes(np.swapaxes(sentinel_patch[:3], 0, 2), 0, 1), 0, 3000) / 3000)
+
+def plot_feature(feat, ax=None, plot_cbar=False, cax=None):
+    if ax is None:
+        im = plt.imshow(feat, cmap='BrBG', vmin=-3.5, vmax=3.5, interpolation='none')
+        plt.axis('off')
+    else:
+        im = ax.imshow(feat, cmap='BrBG', vmin=-3.5, vmax=3.5, interpolation='none')
+        ax.axis('off')
+    if plot_cbar:
+        cbar = ax.figure.colorbar(im, cax=cax, ax=ax, location='left', fraction=0.046, pad=0.04)
+        cbar.set_label('Embed.')
+
+def plot_sta(sta, ax=None, plot_cbar=False, cax=None):
+    lim = 720
+    # lim = 0.01
+    if ax is None:
+        ax = plt.subplot(111)
+    im = ax.imshow(sta, cmap='RdBu_r', vmin=-lim, vmax=lim, interpolation='none')
+    ax.set_xticks([])
+    if plot_cbar:
+        cbar = ax.figure.colorbar(im, cax=cax, ax=ax, location='left', fraction=0.046, pad=0.04)
+        cbar.set_label('TS value')
+    ax.set_yticks([])
+
+def plot_sentinel(img, ax=None, eq_hist=False, clip_im=False):
+    assert not (eq_hist and clip_im), "Cannot both equalize histogram and clip image"
+    if ax is None:
+        ax = plt.subplot(111)
+    if type(img) == xr.core.dataarray.DataArray:
+        img = img.values
+    img_plot = np.swapaxes(np.swapaxes(img[:3], 0, 2), 0, 1)
+    if eq_hist:
+        img_plot = exposure.equalize_hist(img_plot)
+    if clip_im:
+        img_plot = np.clip(img_plot, 0, 3000) / 3000
+    ax.imshow(img_plot, interpolation='none')
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+def plot_dw_landcover_from_hyp(hyp, fig=None, ax=None):
+    lc = hyp[:9, ...]
+    im = np.argmax(lc, axis=0) 
+    if ax is None or fig is None:
+        fig = plt.figure(figsize=(6, 6))
+        ax = plt.subplot(111)
+    dict_classes = du.create_cmap_dynamic_world()
+    cmap_dw = ListedColormap([v for v in dict_classes.values()])
+    im = ax.imshow(im, cmap=cmap_dw, interpolation='none', origin='upper', vmax=8.5, vmin=-0.5)
+    # Place colorbar outside of ax to avoid shrinking the imshow
+    cbar = fig.colorbar(im, ax=ax, ticks=np.arange(0, 9), location='right', fraction=0.046, pad=0.04)
+    cbar.ax.set_yticks(np.arange(0, 9))
+    cbar.ax.set_yticklabels([k for k in dict_classes.keys()])
+    ax.axis('off')
+
+def random_gaussian_blob(size=100):
+    x, y = np.mgrid[-3:3:size*1j, -3:3:size*1j]  # grid
+
+    # random mean
+    mean = np.random.uniform(-2, 0, 2)
+
+    # random covariance matrix -> elongated shapes
+    A = np.random.randn(2, 2) / 2
+    cov = np.dot(A, A.T)  # positive semi-definite
+    cov += np.diag([2, 0.3])  # encourage elongation
+
+    inv_cov = np.linalg.inv(cov)
+
+    pos = np.dstack((x - mean[0], y - mean[1]))
+    blob = np.exp(-0.5 * np.einsum('...i,ij,...j->...', pos, inv_cov, pos))
+    return blob / blob.max()  # normalize
+
+def plot_sta_example(ax_top=None, ax_bottom=None):
+    if ax_top is None or ax_bottom is None:
+        fig, ax = plt.subplots(2, 1, figsize=(3, 6))
+        ax_top = ax[0]
+        ax_bottom = ax[1]
+    
+    size = 0.12
+    centres_inset = [(0.2, 0.2), (0.7, 0.8), (0.8, 0.3), (0.3, 0.7), (0.5, 0.5), (0.55, 0.2)]
+    weights = [0.8, 0.6, 0.4, 0.3, 0.2, 0.1]
+    blobs = [random_gaussian_blob() for _ in range(len(centres_inset))]
+
+    for i in range(len(centres_inset)):
+        ax_inset = ax_top.inset_axes([centres_inset[i][0] - size, centres_inset[i][1] - size, 2 * size, 2 * size])
+        ax_inset.set_xticks([])
+        ax_inset.set_yticks([])
+        ax_inset.imshow(blobs[i], cmap='Grays', interpolation='none')
+        ax_inset.plot(50, 50, 'ro', markersize=4, markeredgecolor='k', alpha=weights[i])
+    ax_top.set_xticks([])
+    ax_top.set_yticks([])
+    ax_top.set_title('Individual\ntuning surfaces (TSs)', fontsize=10)
+
+    ax_bottom.imshow(np.stack([b * weights[j] for j, b in enumerate(blobs)]).mean(0), 
+                     cmap='RdBu_r', interpolation='none', alpha=0.9, vmin=-0.4, vmax=0.4)
+    ax_bottom.set_xticks([])
+    ax_bottom.set_yticks([])
+    ax_bottom.plot(50, 50, 'ro', markersize=6, markeredgecolor='k')
+    ax_bottom.set_title('Weighted TS', fontsize=10)
