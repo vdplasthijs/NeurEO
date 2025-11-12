@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd 
 import shapely 
 import rasterio
+import sklearn.decomposition
 import xarray as xr
 import rioxarray as rxr
 # from shapely.geometry import Point, Polygon
@@ -194,3 +195,36 @@ def adjust_fit_parameters_for_plotting(all_params, radius):
     filtered_params = np.copy(plot_params)
     filtered_params[~np.tile(sta_to_plot[:,:,None], [1,1,7])] = np.nan
     return plot_params, param_names, param_bins, filtered_params, sta_to_plot
+
+def calculate_pca_dim(features_pca, list_n = [1, 5, 10, 50, 100], n_samples=20):
+    assert len(features_pca.shape) == 4
+    n_feat = features_pca.shape[1]
+    dict_expl_var, dict_dim = {n: np.zeros((n_samples, n_feat)) for n in list_n}, {}
+
+    for n in sorted(list_n):
+        dim_list = []
+        if n == features_pca.shape[0]:
+            n_samples = 1
+            dict_expl_var[n] = np.zeros((n_samples, n_feat))
+        for i in tqdm(range(n_samples)):
+            # Randomly sample n features
+            inds = np.random.choice(a=features_pca.shape[0], size=n, replace=False)
+            features_sampled = features_pca[inds, ...]
+            features_sampled = ravel_features(features_sampled)
+            features_sampled[np.isnan(features_sampled)] = 0
+
+            # PCA
+            pca = sklearn.decomposition.PCA(n_components=64)
+            pca.fit(features_sampled.T)
+
+            cum_expl_var = np.cumsum(pca.explained_variance_ratio_)
+            dict_expl_var[n][i, :] = cum_expl_var
+
+            sum_squares = np.sum(np.power(pca.explained_variance_, 2))
+            square_sum = np.sum(pca.explained_variance_) ** 2
+            dim = float(square_sum / sum_squares)
+            # print(dim)
+            dim_list.append(dim)
+        dict_dim[n] = dim_list
+
+    return dict_dim, dict_expl_var

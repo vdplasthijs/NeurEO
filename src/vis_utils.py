@@ -321,3 +321,16 @@ def plot_sta_example(ax_top=None, ax_bottom=None):
     ax_bottom.set_yticks([])
     ax_bottom.plot(50, 50, 'ro', markersize=6, markeredgecolor='k')
     ax_bottom.set_title('Weighted TS', fontsize=10)
+
+def plot_pca_dim(dict_expl_var, dict_dim, ax=None):
+    if ax is None:
+        ax = plt.subplot(111)
+    for i_n, n in enumerate(dict_expl_var.keys()):
+        ax.plot(np.concatenate([[0], dict_expl_var[n].mean(0)]) * 100, '.-', c='k', alpha=(i_n + 1) * 0.15,
+                label=f'N_patches = {n}, D={np.round(np.mean(dict_dim[n]), 1)}')
+
+
+    ax.legend(frameon=False, bbox_to_anchor=(0.3, 0.8), fontsize=8)    
+    ax.set_xlabel('# PCs')
+    ax.set_ylabel('Expl var (%)')
+    return 
