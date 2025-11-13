@@ -70,6 +70,8 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
         im_plot_alpha.values[im_plot_alpha.values == np.inf] = np.nan
         im_plot_alpha = (im_plot_alpha - np.nanmin(im_plot_alpha)) / (np.nanmax(im_plot_alpha) - np.nanmin(im_plot_alpha))
         # im_plot_alpha = np.swapaxes(im_plot_alpha, 2, 1)  # change to (bands, height, width) to (height, width, bands)`
+    else:
+        im_plot_alpha = None
 
     if path_sent is not None:
         im_loaded_s2 = du.load_tiff(path_sent, datatype='da')
@@ -85,7 +87,10 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
         half_size_s2 = size_s2 // 2
         quarter_size_s2 = size_s2 // 4
         # im_plot_s2 = im_plot_s2[:, quarter_size_s2:half_size_s2 + quarter_size_s2, quarter_size_s2:half_size_s2 + quarter_size_s2]
-        
+    else: 
+        im_plot_s2 = None
+        im_nir_s2 = None
+
     if path_dynamic is not None:
         im_loaded_dynamic = du.load_tiff(path_dynamic, datatype='da')
         im_argmax_dynamic = np.argmax(im_loaded_dynamic.values, axis=0)
@@ -94,10 +99,15 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
         # im_plot_dynamic.values[im_plot_dynamic.values == -np.inf] = np.nan
         # im_plot_dynamic.values[im_plot_dynamic.values == np.inf] = np.nan
         # im_plot_dynamic = (im_plot_dynamic - np.nanmin(im_plot_dynamic)) / (np.nanmax(im_plot_dynamic) - np.nanmin(im_plot_dynamic))
+    else:
+        im_loaded_dynamic = None
+        im_argmax_dynamic = None
 
     if path_dsm is not None:
         im_loaded_dsm = du.load_tiff(path_dsm, datatype='da')
-        
+    else:
+        im_loaded_dsm = None
+
     if verbose:
         print(im_loaded_alpha.shape, type(im_loaded_alpha))
         print(im_loaded_s2.shape, type(im_loaded_s2))
@@ -108,13 +118,15 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
     ax = ax.flatten()
 
     ## Top row:
-    plot_image_simple(im_plot_s2, ax=ax[0])
-    ax[0].set_title('Sentinel-2 RGB')
+    if im_plot_s2 is not None:
+        plot_image_simple(im_plot_s2, ax=ax[0])
+        ax[0].set_title('Sentinel-2 RGB')
 
-    plot_image_simple(im_nir_s2, ax=ax[1])
-    ax[1].set_title('Sentinel-2 near infrared')
+    if im_nir_s2 is not None:
+        plot_image_simple(im_nir_s2, ax=ax[1])
+        ax[1].set_title('Sentinel-2 near infrared')
 
-    if path_dynamic is not None:
+    if im_argmax_dynamic is not None:
         dict_classes = du.create_cmap_dynamic_world()
         cmap_dw = ListedColormap([v for v in dict_classes.values()])
         im = ax[2].imshow(im_argmax_dynamic, cmap=cmap_dw, interpolation='none', origin='upper', vmax=8.5, vmin=-0.5)
@@ -124,7 +136,7 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
         cbar.ax.set_yticklabels([k for k in dict_classes.keys()])
         # ax[2].set_title('Dynamic World land cover')
 
-    if path_dsm is not None:
+    if im_loaded_dsm is not None:
         plot_image_simple(im_loaded_dsm, ax=ax[4], name_file=path_dsm)
         ## cbar:
         mappable = ax[4].images[0]
@@ -135,7 +147,7 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
         naked(ax[ii])
 
     ## dynamic world full:
-    if plot_dynamicworld_full and path_dynamic is not None:
+    if im_loaded_dynamic is not None:
         for ii in range(9):
             ax_ind = 5 + ii
             im = ax[ax_ind].imshow(im_loaded_dynamic[ii, ...], cmap='viridis', interpolation='none', 
@@ -148,9 +160,11 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
         cbar.ax.set_ylabel('Probability', rotation=270, labelpad=15)
         ax_ind += 1
         naked(ax[ax_ind])
+    else:
+        ax_ind = 14
 
     ## alpha earth:
-    if plot_alphaearth and path_alpha is not None:
+    if plot_alphaearth and im_plot_alpha is not None:
         for ii in range(20):
             ax_ind += 1
             bands_alpha_plot = np.arange(ii * 3, (ii + 1) * 3)
@@ -161,7 +175,6 @@ def plot_overview_images(path_folder=path_dict['data_folder'], name='sample-0',
             plot_image_simple(im_plot_alpha[bands_alpha_plot, ...], ax=ax[ax_ind])
             ax[ax_ind].set_ylim(ax[ax_ind].get_ylim()[::-1])
             ax[ax_ind].set_title(f'AlphaEarth bands {bands_alpha_plot}')
-
 
 def plot_distr_embeddings(path_folder=path_dict['data_folder'], name='sample-0', verbose=0):
     (file_sent, file_alpha, file_dynamic, file_worldclimbio, file_dsm) = du.get_images_from_name(path_folder=path_folder, name=name)
@@ -257,7 +270,7 @@ def plot_sentinel(img, ax=None, eq_hist=False, clip_im=False):
     if eq_hist:
         img_plot = exposure.equalize_hist(img_plot)
     if clip_im:
-        img_plot = np.clip(img_plot, 0, 3000) / 3000
+        img_plot = np.clip(img_plot, 0, 2000) / 2000
     ax.imshow(img_plot, interpolation='none')
     ax.set_xticks([])
     ax.set_yticks([])
