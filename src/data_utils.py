@@ -23,7 +23,7 @@ import loadpaths
 path_dict = loadpaths.loadpaths()
 sys.path.append(os.path.join(path_dict['repo'], 'content/'))
 
-ONLINE_ACCESS_TO_GEE = False 
+ONLINE_ACCESS_TO_GEE = True 
 if ONLINE_ACCESS_TO_GEE:
     import api_keys
     import ee, geemap 
@@ -50,8 +50,7 @@ def load_tiff(tiff_file_path, datatype='np', verbose=0):
             assert type(im) == xr.DataArray
         else:
             assert False, 'datatype should be np or da'
-
-    return im 
+    return im
 
 def create_cmap_dynamic_world():
     dict_classes = {
@@ -81,7 +80,7 @@ def create_timestamp(include_seconds=False):
         timestamp += ':' + str(dt.second).zfill(2)
     return timestamp
 
-def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01, 
+def get_gee_image_from_point(coords, bool_buffer_in_deg=False, buffer_deg=0.01, buffer_m=800,
                              verbose=0, year=None, threshold_size=128,
                              month_start_str='06', month_end_str='09',
                              image_collection='sentinel2'):
@@ -90,17 +89,21 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01,
     if year is None:
         year = 2024
 
-    point = shapely.geometry.Point(coords)
     if bool_buffer_in_deg:  # not ideal https://gis.stackexchange.com/questions/304914/python-shapely-intersection-with-buffer-in-meter
+        print('WARNING: using buffer in degrees, which is not ideal for large latitudes.')
+        point = shapely.geometry.Point(coords)
         polygon = point.buffer(buffer_deg, cap_style=3)  ## buffer in degrees
         xy_coords = np.array(polygon.exterior.coords.xy).T 
         aoi = ee.Geometry.Polygon(xy_coords.tolist())
     else:
-        assert False, 'not implemented yet'
+        point = ee.Geometry.Point(coords)
+        aoi = point.buffer(buffer_m).bounds()
     
     if image_collection == 'sentinel2':
         ex_collection = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-
+        if ex_collection is None:
+            print(f'ERROR: could not load sentinel-2 collection from {coords}')
+            return None
         ## also consider creating a mosaic instead: https://gis.stackexchange.com/questions/363163/filter-out-the-least-cloudy-images-in-sentinel-google-earth-engine
         ex_im_gee = ee.Image(ex_collection 
                             #   .project(crs='EPSG:27700', scale=1)
@@ -112,6 +115,9 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01,
                             .clip(aoi))
     elif image_collection == 'alphaearth':
         ex_collection = ee.ImageCollection("GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL")
+        if ex_collection is None:
+            print(f'ERROR: could not load alphaearth collection from {coords}')
+            return None
         ex_im_gee = ee.Image(ex_collection 
                             #   .project(crs='EPSG:27700', scale=1)
                             .filterBounds(aoi) 
@@ -131,6 +137,9 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01,
             "crops", "shrub_and_scrub", "built", "bare", "snow_and_ice"
         ]
         ex_collection = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+        if ex_collection is None:
+            print(f'ERROR: could not load dynamicworld collection from {coords}')
+            return None
         ex_im_gee = ee.Image(ex_collection 
                             #   .project(crs='EPSG:27700', scale=1)
                             .filterBounds(aoi) 
@@ -143,10 +152,19 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01,
     elif image_collection == 'worldclimbio':
         ex_im_gee = ee.Image("WORLDCLIM/V1/BIO").clip(aoi) 
         point = ee.Geometry.Point(coords)  # redefine point for sampling
-        values = ex_im_gee.sample(region=point.buffer(1000), scale=1000).first().toDictionary().getInfo()
+        values = ex_im_gee.sample(region=point.buffer(1000), scale=1000).first()
+        if values is None:
+            values = ex_im_gee.sample(region=point.buffer(10000), scale=1000).first()
+        if values is None:
+            print(f'ERROR: could not sample worldclimbio collection from {coords}')
+            return None
+        values = values.toDictionary().getInfo()
         return values
     elif image_collection == 'dsm':
         ex_collection = ee.ImageCollection("COPERNICUS/DEM/GLO30")
+        if ex_collection is None:
+            print(f'ERROR: could not load dsm collection from {coords}')
+            return None
         ex_im_gee = ee.Image(ex_collection
                             .filterBounds(aoi)
                             .select(['DEM'])  # select the DEM band
@@ -171,8 +189,22 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=True, buffer_deg=0.01,
     
     return ex_im_gee
 
-def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.01, 
-                    verbose=0, year=None, 
+def create_filename(base_name, image_collection='sentinel2', year=2024,
+                    month_start_str='06', month_end_str='09'):
+    if image_collection == 'sentinel2':
+        filename = f'{base_name}_sent2-4band_y-{year}_m-{month_start_str}-{month_end_str}.tif'
+    elif image_collection == 'alphaearth':
+        filename = f'{base_name}_alphaearth_y-{year}.tif'
+    elif image_collection == 'worldclimbio':
+        filename = f'{base_name}_worldclimbio_v1.json'
+    elif image_collection == 'dynamicworld':
+        filename = f'{base_name}_dynamicworld_y-{year}.tif'
+    elif image_collection == 'dsm':
+        filename = f'{base_name}_dsm_y-{year}.tif'
+    return filename
+
+def download_gee_image(coords, name: str, bool_buffer_in_deg=False, buffer_deg=0.01, buffer_m=800, 
+                    verbose=0, year=None, threshold_size=128,
                     month_start_str='06', month_end_str='09',
                     image_collection='sentinel2',
                     path_save=None, resize_image=True):
@@ -180,11 +212,12 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
     if year is None:
         year = 2024
 
-    im_gee = get_gee_image_from_point(coords=coords, bool_buffer_in_deg=bool_buffer_in_deg, buffer_deg=buffer_deg, 
-                           verbose=verbose, year=year, 
-                           month_start_str=month_start_str, month_end_str=month_end_str,
-                           image_collection=image_collection,
-                           threshold_size=128)
+    im_gee = get_gee_image_from_point(coords=coords, bool_buffer_in_deg=bool_buffer_in_deg,
+                                      buffer_deg=buffer_deg, buffer_m=buffer_m,
+                                        verbose=verbose, year=year, 
+                                        month_start_str=month_start_str, month_end_str=month_end_str,
+                                        image_collection=image_collection,
+                                        threshold_size=threshold_size)
     if im_gee is None:  ## if image was too small it was discarded
         return None, None
 
@@ -194,16 +227,8 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
         os.makedirs(path_save)
         print(f'Created folder {path_save}')
 
-    if image_collection == 'sentinel2':
-        filename = f'{name}_sent2-4band_y-{year}_m-{month_start_str}-{month_end_str}.tif'
-    elif image_collection == 'alphaearth':
-        filename = f'{name}_alphaearth_y-{year}.tif'
-    elif image_collection == 'worldclimbio':
-        filename = f'{name}_worldclimbio_v1.json'
-    elif image_collection == 'dynamicworld':
-        filename = f'{name}_dynamicworld_y-{year}.tif'
-    elif image_collection == 'dsm':
-        filename = f'{name}_dsm_y-{year}.tif'
+    filename = create_filename(base_name=name, image_collection=image_collection, year=year,
+                               month_start_str=month_start_str, month_end_str=month_end_str)
     filepath = os.path.join(path_save, filename)
 
     if image_collection == 'worldclimbio':  # just return values
@@ -216,6 +241,7 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
         im_gee, filename=filepath, 
         scale=10,  # 10m bands
         file_per_band=False,# crs='EPSG:32630'
+        verbose=False
     )
 
     if resize_image:
@@ -244,8 +270,8 @@ def download_gee_image(coords, name: str, bool_buffer_in_deg=True, buffer_deg=0.
 
     return im_gee, filepath
 
-def download_list_coord(coord_list, path_save=None, 
-                        name_group='sample', start_index=0, stop_index=None,
+def download_list_coord(coord_list, path_save=None, bool_buffer_in_deg=False, buffer_deg=0.01, buffer_m=800,
+                        name_group='sample', start_index=0, stop_index=None, resize_image=True, threshold_size=128,
                         list_collections=['sentinel2', 'alphaearth', 'dynamicworld', 'worldclimbio', 'dsm']):
     assert type(coord_list) == list
     inds_none = []
@@ -258,14 +284,17 @@ def download_list_coord(coord_list, path_save=None,
         for im_collection in list_collections:
             try:
                 im, path_im = download_gee_image(coords=coords, name=name, 
+                                                bool_buffer_in_deg=bool_buffer_in_deg,
+                                                buffer_deg=buffer_deg, buffer_m=buffer_m,
                                                 path_save=path_save, verbose=0,
+                                                resize_image=resize_image,
+                                                threshold_size=threshold_size,
                                                 image_collection=im_collection)
             except Exception as e:
-                print(f'Image {name} could not be downloaded, error: {e}')
+                print(f'Image {name}, {im_collection} could not be downloaded, error: {e}')
                 im = None
             if im is None:
-                print(f'Image {name} could not be downloaded')
-                inds_none.append(i)
+                inds_none.append(f'{i}_{im_collection}')
         
     if len(inds_none) > 0:
         print(f'Images that could not be downloaded: {inds_none}')
