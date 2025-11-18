@@ -11,6 +11,8 @@ import xarray as xr
 import rioxarray as rxr
 # from shapely.geometry import Point, Polygon
 import datetime
+import utm 
+
 # import warnings
 # from shapely.errors import ShapelyDeprecationWarning
 # warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning) 
@@ -80,14 +82,27 @@ def create_timestamp(include_seconds=False):
         timestamp += ':' + str(dt.second).zfill(2)
     return timestamp
 
+def get_epsg_from_latlon(lat, lon):
+    """Get the UTM EPSG code from latitude and longitude.
+    https://gis.stackexchange.com/questions/269518/auto-select-suitable-utm-zone-based-on-grid-intersection
+    """
+    utm_result = utm.from_latlon(lat, lon)
+    zone_number = utm_result[2]
+    hemisphere = '326' if lat >= 0 else '327'
+    epsg_code = int(hemisphere + str(zone_number).zfill(2))
+    return epsg_code
+
 def get_gee_image_from_point(coords, bool_buffer_in_deg=False, buffer_deg=0.01, buffer_m=800,
                              verbose=0, year=None, threshold_size=128,
                              month_start_str='06', month_end_str='09',
                              image_collection='sentinel2'):
+    '''Coords: (lon, lat)'''
     assert ONLINE_ACCESS_TO_GEE, 'Need to set ONLINE_ACCESS_TO_GEE to True to use this function'
     assert image_collection in ['sentinel2', 'alphaearth', 'worldclimbio', 'dynamicworld', 'dsm'], f'image_collection {image_collection} not recognised.'
     if year is None:
         year = 2024
+    lon, lat = coords
+    epsg_code = get_epsg_from_latlon(lat=lat, lon=lon)
 
     if bool_buffer_in_deg:  # not ideal https://gis.stackexchange.com/questions/304914/python-shapely-intersection-with-buffer-in-meter
         print('WARNING: using buffer in degrees, which is not ideal for large latitudes.')
@@ -106,12 +121,12 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=False, buffer_deg=0.01, 
             return None
         ## also consider creating a mosaic instead: https://gis.stackexchange.com/questions/363163/filter-out-the-least-cloudy-images-in-sentinel-google-earth-engine
         ex_im_gee = ee.Image(ex_collection 
-                            #   .project(crs='EPSG:27700', scale=1)
                             .filterBounds(aoi) 
                             .filterDate(ee.Date(f'{year}-{month_start_str}-01'), ee.Date(f'{year}-{month_end_str}-01')) 
                             .select(['B4', 'B3', 'B2', 'B8'])  # 10m bands, RGB and NIR
                             .sort('CLOUDY_PIXEL_PERCENTAGE')
                             .first()  # get the least cloudy image
+                            .reproject(f'EPSG:{epsg_code}', scale=10)
                             .clip(aoi))
     elif image_collection == 'alphaearth':
         ex_collection = ee.ImageCollection("GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL")
@@ -119,19 +134,13 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=False, buffer_deg=0.01, 
             print(f'ERROR: could not load alphaearth collection from {coords}')
             return None
         ex_im_gee = ee.Image(ex_collection 
-                            #   .project(crs='EPSG:27700', scale=1)
                             .filterBounds(aoi) 
                             .filterDate(ee.Date(f'{year}-01-01'), ee.Date(f'{year}-12-31')) 
                             .first() 
+                            .reproject(f'EPSG:{epsg_code}')  
                             .clip(aoi))
+
     elif image_collection == 'dynamicworld':
-        # ex_collection = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
-        # ex_im_gee = ee.Image(ex_collection 
-        #                     #   .project(crs='EPSG:27700', scale=1)
-        #                     .filterBounds(aoi) 
-        #                     .filterDate(ee.Date(f'{year}-01-01'), ee.Date(f'{year}-12-31')) 
-        #                     .first() 
-        #                     .clip(aoi))
         prob_bands = [
             "water", "trees", "grass", "flooded_vegetation",
             "crops", "shrub_and_scrub", "built", "bare", "snow_and_ice"
@@ -146,7 +155,7 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=False, buffer_deg=0.01, 
                             .filterDate(ee.Date(f'{year}-01-01'), ee.Date(f'{year}-12-31'))
                             .select(prob_bands)  # get all probability bands
                             .mean()  # mean over the year
-                            .reproject('EPSG:4326', scale=10)  # reproject to 10m
+                            .reproject(f'EPSG:{epsg_code}', scale=10)  # reproject to 10m
                             .clip(aoi)
                             )  # mean over the year
     elif image_collection == 'worldclimbio':
@@ -170,6 +179,7 @@ def get_gee_image_from_point(coords, bool_buffer_in_deg=False, buffer_deg=0.01, 
                             .select(['DEM'])  # select the DEM band
                             # .filterDate(ee.Date(f'{year}-01-01'), ee.Date(f'{year}-12-31'))
                             .first()
+                            .reproject(f'EPSG:{epsg_code}', scale=10)
                             .clip(aoi))
         threshold_size = max(32, threshold_size // 4)  # DSM is 30m resolution, so allow smaller images
     else:
@@ -274,6 +284,19 @@ def download_list_coord(coord_list, path_save=None, bool_buffer_in_deg=False, bu
                         name_group='sample', start_index=0, stop_index=None, resize_image=True, threshold_size=128,
                         list_collections=['sentinel2', 'alphaearth', 'dynamicworld', 'worldclimbio', 'dsm']):
     assert type(coord_list) == list
+    if path_save is None:
+        path_save = path_dict['data_folder'] 
+    if not os.path.exists(path_save):
+        os.makedirs(path_save)
+        print(f'Created folder {path_save}')
+    else:
+        print(f'WARNING: folder {path_save} already exists. OVERWRITING files!')
+
+    ## save list coords:
+    filename_coords = os.path.join(path_save, f'{name_group}_coords.json')
+    with open(filename_coords, 'w') as f:
+        json.dump(coord_list, f)
+
     inds_none = []
     for i, coords in enumerate(tqdm(coord_list)):
         if i < start_index:
@@ -303,7 +326,7 @@ def download_list_coord(coord_list, path_save=None, bool_buffer_in_deg=False, bu
 def get_images_from_name(path_folder=path_dict['data_folder'], name='sample-0'):
     assert os.path.exists(path_folder), path_folder
     contents = [f for f in os.listdir(path_folder) if name == f.split('_')[0]]
-    assert len(contents) > 0, f'No files found in {path_folder}'
+    assert len(contents) > 0, f'No files found starting with {name}_ in {path_folder}'
     assert len(contents) <= 5, f'More than 5 files found in {path_folder}, please specify name more precisely: {contents}'
 
     file_sent, file_alpha, file_dynamic, file_worldclimbio, file_dsm = None, None, None, None, None
@@ -384,21 +407,26 @@ def load_all_modalities_from_name(path_folder=path_dict['data_folder'], name='sa
 
     return im_loaded_s2, im_loaded_alpha, im_loaded_dynamic, im_loaded_worldclimbio, im_loaded_dsm
 
-def load_all_data(path_folder='/Users/tplas/data/2025-10 neureo/pecl-100-subsample-30km', 
+def load_all_data(path_folder='/Users/tplas/data/2025-10 neureo/pecl-100-subsample-30km_v2', 
                   prefix_name='pecl176-', rotate_90deg=False, zscore_features=False, 
-                  zscore_hypotheses=False, equalize_sentinel=False):
+                  zscore_hypotheses=False, equalize_sentinel=False,
+                  complete_only=False, n_max_patches=None, nancheck=True):
     assert os.path.exists(path_folder), path_folder
     
-    patches = len(os.listdir(path_folder))  ## overestimate, doesnt matter.
+    n_patches = len(os.listdir(path_folder))  ## overestimate, doesnt matter.
     hypotheses = []
     features = []
     sentinel = []
-    for p in trange(patches):
+    
+    for p in trange(n_patches):
         (data_sent, data_alpha, data_dyn, data_worldclim, data_dsm) = load_all_modalities_from_name(name=f'{prefix_name}{p}', 
                                                                                 path_folder=path_folder, verbose=0)
 
         if data_alpha is None:
             continue
+        if complete_only:
+            if data_sent is None or data_dyn is None or data_dsm is None or data_alpha is None:
+                continue
         # Land coverage and DSM serve as hypotheses
         assert len(data_dyn.data.shape) == 3 and len(data_dsm.data.shape) == 3 and data_dyn.data.shape[1:] == data_dsm.data.shape[1:]
         hyp_tmp = np.concatenate([data_dyn.data, data_dsm.data], axis=0)
@@ -410,6 +438,20 @@ def load_all_data(path_folder='/Users/tplas/data/2025-10 neureo/pecl-100-subsamp
         hypotheses.append(hyp_tmp)
         features.append(f_dat)    
         sentinel.append(data_sent.data)
+
+        if n_max_patches is not None and len(features) >= n_max_patches:
+            break
+    
+    if len(features) == 0:
+        print('ERROR: No patches were loaded, please check the path and prefix_name.')
+        return None, None, None, None
+
+    if nancheck:
+        assert np.sum([np.sum(np.isnan(f)) for f in features]) == 0, "NaNs found in features, please check the data."
+        assert np.sum([np.sum(np.isnan(h)) for h in hypotheses]) == 0, "NaNs found in hypotheses, please check the data."
+        assert np.sum([np.sum(np.isinf(f)) for f in features]) == 0, "Infs found in features, please check the data."
+        assert np.sum([np.sum(np.isinf(h)) for h in hypotheses]) == 0, "Infs found in hypotheses, please check the data."
+        print(f'Loaded {len(features)} patches from {path_folder}, no NaNs or Infs found.')
 
     if zscore_features:
         # Z-score across patches for each feature and each hypothesis
