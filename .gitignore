@@ -209,3 +209,5 @@ content/api_keys.py
 .DS_Store
 .vscode/settings.json
 *.code-workspace
+
+outputs/radius10/sta_dat.png
