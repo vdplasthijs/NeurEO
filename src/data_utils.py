@@ -409,7 +409,7 @@ def load_all_modalities_from_name(path_folder=path_dict['data_folder'], name='sa
 
 def load_all_data(path_folder='/Users/tplas/data/2025-10 neureo/pecl-100-subsample-30km_v2', 
                   prefix_name='pecl176-', rotate_90deg=False, zscore_features=False, 
-                  zscore_hypotheses=False, equalize_sentinel=False,
+                  zscore_hypotheses=False, equalize_sentinel=False, nonnan_only=False,
                   complete_only=False, n_max_patches=None, nancheck=True):
     assert os.path.exists(path_folder), path_folder
     
@@ -426,6 +426,17 @@ def load_all_data(path_folder='/Users/tplas/data/2025-10 neureo/pecl-100-subsamp
             continue
         if complete_only:
             if data_sent is None or data_dyn is None or data_dsm is None or data_alpha is None:
+                continue
+        if nonnan_only:
+            if data_sent is None or data_dyn is None or data_dsm is None or data_alpha is None:
+                continue
+            if np.sum(np.isnan(data_alpha.data)) > 0 or np.sum(np.isinf(data_alpha.data)) > 0:
+                continue
+            if np.sum(np.isnan(data_dyn.data)) > 0:
+                continue
+            if np.sum(np.isnan(data_dsm.data)) > 0:
+                continue
+            if np.sum(np.isnan(data_sent.data)) > 0:
                 continue
         # Land coverage and DSM serve as hypotheses
         assert len(data_dyn.data.shape) == 3 and len(data_dsm.data.shape) == 3 and data_dyn.data.shape[1:] == data_dsm.data.shape[1:]
