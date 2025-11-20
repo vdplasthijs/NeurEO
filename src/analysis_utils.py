@@ -5,7 +5,7 @@ import shapely
 import rasterio
 import sklearn.decomposition
 from sklearn.cross_decomposition import CCA
-
+from sklearn.linear_model import LinearRegression   
 import xarray as xr
 import rioxarray as rxr
 # from shapely.geometry import Point, Polygon
@@ -242,57 +242,62 @@ def cca_and_normal_ols_from_hypotheses(features, hypotheses):
     features_all = ravel_features(features_all)
     hypotheses_all = np.stack(hypotheses, axis=0)
     hypotheses_all = ravel_features(hypotheses_all)
-    
+
     assert np.sum(np.isnan(features_all)) == 0, "NaNs found in features_all, please check the data."
     assert np.sum(np.isnan(hypotheses_all)) == 0, "NaNs found in hypotheses_all, please check the data."
+
+    n_patches = len(features)
+
+    ## CCA:
+    feat_ravel = features_all.T # ravel_features(np.stack(features))
+    hyp_ravel = hypotheses_all.T #ravel_features(np.stack(hypotheses))
+    assert feat_ravel.shape[0] == hyp_ravel.shape[0], (feat_ravel.shape, hyp_ravel.shape)
+    print(f'Feature ravel shape: {feat_ravel.shape}, Hypothesis ravel shape: {hyp_ravel.shape}')
+
+    cca = CCA(n_components=10)
+    feat_c, hyp_c = cca.fit_transform(feat_ravel, hyp_ravel)
+    canonical_corrs = [np.corrcoef(feat_c[:, i], hyp_c[:, i])[0, 1] for i in range(cca.n_components)]
+    print("Canonical correlations:", np.round(canonical_corrs, 3))
+    print(f'CCA components shape: F {feat_c.shape}, H {hyp_c.shape}')
+    
+    assert feat_c.shape[0] > feat_c.shape[1], (feat_c.shape)
+    assert feat_ravel.shape[0] > feat_ravel.shape[1], (feat_ravel.shape)
+    lr = LinearRegression(copy_X=True, fit_intercept=True)
+    lr.fit(feat_c, feat_ravel)
+    feat_hat_ols_cc = lr.predict(feat_c)
+    r2_per_feature_cc = 1 - np.sum((feat_ravel - feat_hat_ols_cc)**2, axis=0) / np.sum((feat_ravel - np.mean(feat_ravel, axis=0))**2, axis=0)
+    
+    feat_res_ols_cc = feat_ravel - feat_hat_ols_cc
+    feat_res_ols_cc_img = unravel_features(feat_res_ols_cc.T, n_patches=n_patches, nx=128, ny=128)
+    feat_hat_ols_cc_img = unravel_features(feat_hat_ols_cc.T, n_patches=n_patches, nx=128, ny=128)
+
+    # ## With OLS reprojection from H:
+    lr = LinearRegression(copy_X=True, fit_intercept=True)
+    lr.fit(hyp_ravel, feat_ravel)
+    feat_hat_ols_h = lr.predict(hyp_ravel)
+    r2_per_feature_h = 1 - np.sum((feat_ravel - feat_hat_ols_h)**2, axis=0) / np.sum((feat_ravel - np.mean(feat_ravel, axis=0))**2, axis=0)
+
+    feat_res_ols_h = feat_ravel - feat_hat_ols_h
+    feat_res_ols_h_img = unravel_features(feat_res_ols_h.T, n_patches=n_patches, nx=128, ny=128)
+    feat_hat_ols_h_img = unravel_features(feat_hat_ols_h.T, n_patches=n_patches, nx=128, ny=128)
+
+    return (feat_hat_ols_cc_img, feat_res_ols_cc_img), (feat_hat_ols_h_img, feat_res_ols_h_img), (np.stack(features, axis=0), np.stack(hypotheses, axis=0)), (canonical_corrs, r2_per_feature_cc, r2_per_feature_h)
+
+
+
+## CCA with nans:
+    # features_all = np.stack(features, axis=0)
+    # features_all = ravel_features(features_all)
+    # hypotheses_all = np.stack(hypotheses, axis=0)
+    # hypotheses_all = ravel_features(hypotheses_all)
+
+    # assert np.sum(np.isnan(features_all)) == 0, "NaNs found in features_all, please check the data."
+    # assert np.sum(np.isnan(hypotheses_all)) == 0, "NaNs found in hypotheses_all, please check the data."
 
     # inds_pixels_nonnan = np.isnan(features_all).sum(0) == 0
     # features_all_nonnan = features_all[:, inds_pixels_nonnan]
     # hypotheses_all_nonnan = hypotheses_all[:, inds_pixels_nonnan]
 
-    n_patches = len(features)
-    n_hyp = hypotheses[0].shape[0]
-    n_feat = features[0].shape[0]
-
-    ## CCA:
-    feat_ravel = features_all # ravel_features(np.stack(features))
-    hyp_ravel = hypotheses_all #ravel_features(np.stack(hypotheses))
-    assert feat_ravel.shape[1] == hyp_ravel.shape[1], (feat_ravel.shape, hyp_ravel.shape)
-
-    cca = CCA(n_components=10)
-    feat_c, hyp_c = cca.fit_transform(feat_ravel.T, hyp_ravel.T)
-    canonical_corrs = [np.corrcoef(feat_c[:, i], hyp_c[:, i])[0, 1] for i in range(cca.n_components)]
-    print("Canonical correlations:", np.round(canonical_corrs, 3))
-
-    ## Reprojection:
-    ## With original CCA weights:
-    weight_mat_cc = cca.x_weights_.T
-    # feat_hat_cc = feat_c @ cca.x_weights_.T
-    # feat_res_cc = feat_ravel - feat_hat_cc.T
-    # feat_res_cc_img = unravel_features(feat_res_cc, n_patches=n_patches, nx=128, ny=128)
-    # feat_hat_cc_img = unravel_features(feat_hat_cc.T, n_patches=n_patches, nx=128, ny=128)
-
-    ## With OLS reprojection from CC:
-    ## Original:
-    ## feat_ravel = feat_c @ weight_mat_cc.T + residuals
-    ## OLS alternative:
-    ## feat_ravel = feat_c @ pinv(feat_c) @ feat_ravel + residuals
-    weight_mat_ols_cc = np.linalg.pinv(feat_c).dot(feat_ravel.T)
-    assert weight_mat_cc.shape == weight_mat_ols_cc.shape, (weight_mat_cc.shape, weight_mat_ols_cc.shape)
-    feat_hat_ols_cc = feat_c.dot(weight_mat_ols_cc).T
-    feat_res_ols_cc = feat_ravel - feat_hat_ols_cc
-    feat_res_ols_cc_img = unravel_features(feat_res_ols_cc, n_patches=n_patches, nx=128, ny=128)
-    feat_hat_ols_cc_img = unravel_features(feat_hat_ols_cc, n_patches=n_patches, nx=128, ny=128)
-
-    ## With OLS reprojection from H:
-    weight_mat_ols_h = np.linalg.pinv(hyp_ravel.T).dot(feat_ravel.T)
-    assert weight_mat_cc.shape == weight_mat_ols_h.shape, (weight_mat_cc.shape, weight_mat_ols_h.shape)
-    feat_hat_ols_h = hyp_ravel.T.dot(weight_mat_ols_h).T
-    feat_res_ols_h = feat_ravel - feat_hat_ols_h
-    feat_res_ols_h_img = unravel_features(feat_res_ols_h, n_patches=n_patches, nx=128, ny=128)
-    feat_hat_ols_h_img = unravel_features(feat_hat_ols_h, n_patches=n_patches, nx=128, ny=128)
-
-    ## CCA with nans:
     # feat_ravel = features_all_nonnan # au.ravel_features(np.stack(features))
     # hyp_ravel = hypotheses_all_nonnan #au.ravel_features(np.stack(hypotheses))
     # assert feat_ravel.shape[1] == hyp_ravel.shape[1], (feat_ravel.shape, hyp_ravel.shape)
@@ -342,4 +347,4 @@ def cca_and_normal_ols_from_hypotheses(features, hypotheses):
     # feat_hat_ols_h_img[:, inds_pixels_nonnan] = feat_hat_ols_h
     # feat_hat_ols_h_img = au.unravel_features(feat_hat_ols_h_img, n_patches=n_patches, nx=128, ny=128)
 
-    return (feat_hat_ols_cc_img, feat_res_ols_cc_img), (feat_hat_ols_h_img, feat_res_ols_h_img)
+    
